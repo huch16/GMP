@@ -221,7 +221,12 @@ const jsFiles = {
   async startRecording() {
     try {
       this.recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      this.audioContext = new AudioContext({ sampleRate: this.sampleRate });
+      try {
+        this.audioContext = new AudioContext({ sampleRate: this.sampleRate });
+      } catch (e) {
+        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      try { if (this.audioContext.state === 'suspended') this.audioContext.resume(); } catch (e) {}
       const source = this.audioContext.createMediaStreamSource(this.recordingStream);
       this.analyser = this.audioContext.createAnalyser();
       source.connect(this.analyser);
@@ -238,12 +243,14 @@ const jsFiles = {
       this.scriptProcessor.connect(this.micGain);
       this.micGain.connect(this.audioContext.destination);
       this.isRecording = true;
+      return true;
     } catch (e) {
       console.error('Recording error:', e);
       this.onError?.('麦克风启动失败：' + (e.name || e.message || '请检查权限或设备'));
       this.isMicActive = false;
       document.getElementById('micBtn').classList.remove('active');
       localStorage.setItem('micEnabled', 'false');
+      return false;
     }
   }
 
@@ -599,11 +606,24 @@ class ChatUI {
   setupEventListeners() {
     document.getElementById('connectBtn').onclick = () => this.agent.connect();
     document.getElementById('disconnectBtn').onclick = () => this.agent.disconnect();
-    document.getElementById('micBtn').onclick = () => {
-      if (!this.agent.isConnected) { this.addMessage('system', '请先点击 Connect 建立连接'); return; }
+    document.getElementById('micBtn').onclick = async () => {
       const btn = document.getElementById('micBtn');
-      if (this.agent.isMicActive) { btn.classList.remove('active'); this.agent.stopRecording(); } else { btn.classList.add('active'); this.agent.startRecording(); }
-      this.agent.isMicActive = !this.agent.isMicActive;
+      if (this.agent.isConnected) {
+        if (this.agent.isMicActive) {
+          this.agent.stopRecording();
+          this.agent.isMicActive = false;
+          btn.classList.remove('active');
+        } else {
+          const ok = await this.agent.startRecording();
+          if (!ok) return;
+          this.agent.isMicActive = true;
+          btn.classList.add('active');
+        }
+      } else {
+        this.agent.isMicActive = !this.agent.isMicActive;
+        btn.classList.toggle('active', this.agent.isMicActive);
+        this.addMessage('system', '麦克风已' + (this.agent.isMicActive ? '开启' : '关闭') + '（连接后生效）');
+      }
       localStorage.setItem('micEnabled', this.agent.isMicActive);
     };
     document.getElementById('cameraBtn').onclick = () => {
@@ -704,6 +724,7 @@ class ChatUI {
 
   setupAudioPipeline() {
     this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (this.audioCtx.state === 'suspended') this.audioCtx.resume();
     this.gainNode = this.audioCtx.createGain();
     this.gainNode.connect(this.audioCtx.destination);
     this.gainNode.gain.value = 0.8;
@@ -721,6 +742,7 @@ class ChatUI {
     const item = this.audioQueue.shift();
     if (!item) { this.audioPlaying = false; return; }
     const ctx = this.audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (ctx.state === 'suspended') ctx.resume();
     const view = new DataView(item.buffer);
     const frameCount = view.byteLength / 2;
     const audioBuffer = ctx.createBuffer(1, frameCount, item.sampleRate || 24000);
