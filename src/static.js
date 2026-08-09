@@ -218,6 +218,20 @@ const jsFiles = {
     return btoa(binary);
   }
 
+  trackVoiceActivity(inputData) {
+    const now = performance.now();
+    let sum = 0;
+    for (let i = 0; i < inputData.length; i++) sum += inputData[i] * inputData[i];
+    const rms = Math.sqrt(sum / inputData.length);
+    if (rms > 0.008) this.vadLastVoice = now;
+    if (this.modelSpeaking) return;
+    if (this.vadLastVoice && !this.vadPending && now - this.vadLastVoice > 1200) {
+      this.vadPending = true;
+      this.onVoiceSilence?.();
+      setTimeout(() => { this.vadPending = false; this.vadLastVoice = null; }, 400);
+    }
+  }
+
   async startRecording() {
     try {
       this.recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -236,12 +250,16 @@ const jsFiles = {
         const inputData = e.inputBuffer.getChannelData(0);
         const pcm = this.floatTo16BitPCM(inputData);
         this.sendAudio(pcm);
+        this.trackVoiceActivity(inputData);
       };
       source.connect(this.scriptProcessor);
       this.micGain = this.audioContext.createGain();
       this.micGain.gain.value = 0;
       this.scriptProcessor.connect(this.micGain);
       this.micGain.connect(this.audioContext.destination);
+      this.vadLastVoice = null;
+      this.vadPending = false;
+      this.modelSpeaking = false;
       this.isRecording = true;
       return true;
     } catch (e) {
@@ -367,13 +385,8 @@ class GeminiAgent extends RealtimeAgent {
       systemInstruction: { parts: [{ text: localStorage.getItem('systemInstructions') || 'You are a helpful assistant.' }] },
       realtimeInputConfig: {
         automaticActivityDetection: {
-          disabled: false,
-          silenceDurationMs: 2000,
-          prefixPaddingMs: 500,
-          endOfSpeechSensitivity: 'END_SENSITIVITY_LOW',
-          startOfSpeechSensitivity: 'START_SENSITIVITY_LOW',
+          disabled: true,
         },
-        activityHandling: 'ACTIVITY_HANDLING_UNSPECIFIED',
         turnCoverage: 'TURN_INCLUDES_ALL_INPUT',
       },
       tools: { functionDeclarations: [] },
@@ -387,6 +400,12 @@ class GeminiAgent extends RealtimeAgent {
 
   sendText(text) {
     this.send({ clientContent: { turns: [{ role: 'user', parts: [{ text }] }], turnComplete: true } });
+  }
+
+  onVoiceSilence() {
+    if (this.isConnected) {
+      this.send({ clientContent: { turns: [{ role: 'user', parts: [{ text: '' }] }], turnComplete: true } });
+    }
   }
 
   sendAudio(pcmData) {
@@ -406,6 +425,7 @@ class GeminiAgent extends RealtimeAgent {
         for (const part of msg.serverContent.modelTurn.parts) {
           if (part.text) { this.onText?.(part.text); }
           if (part.inlineData?.data) {
+            this.modelSpeaking = true;
             const binary = atob(part.inlineData.data);
             const bytes = new Uint8Array(binary.length);
             for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
@@ -414,8 +434,14 @@ class GeminiAgent extends RealtimeAgent {
           }
         }
       }
-      if (msg.serverContent?.turnComplete) { this.onTurnComplete?.(); }
-      if (msg.serverContent?.interrupted) { this.onInterrupted?.(); }
+      if (msg.serverContent?.turnComplete) {
+        setTimeout(() => { this.modelSpeaking = false; this.vadLastVoice = null; }, 800);
+        this.onTurnComplete?.();
+      }
+      if (msg.serverContent?.interrupted) {
+        this.modelSpeaking = false;
+        this.onInterrupted?.();
+      }
     } catch (e) { console.error('Parse error:', e); }
   }
 }
