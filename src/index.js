@@ -105,7 +105,7 @@ async function handleGeminiWebSocket(request, env) {
     return new Response('GOOGLE_API_KEY not configured', { status: 500 });
   }
   const targetUrl =
-    `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${env.GOOGLE_API_KEY}`;
+    `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${env.GOOGLE_API_KEY}`;
 
   let upstream;
   try {

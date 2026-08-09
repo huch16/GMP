@@ -365,6 +365,17 @@ class GeminiAgent extends RealtimeAgent {
         }
       },
       systemInstruction: { parts: [{ text: localStorage.getItem('systemInstructions') || 'You are a helpful assistant.' }] },
+      realtimeInputConfig: {
+        automaticActivityDetection: {
+          disabled: false,
+          silenceDurationMs: 2000,
+          prefixPaddingMs: 500,
+          endOfSpeechSensitivity: 'END_SENSITIVITY_LOW',
+          startOfSpeechSensitivity: 'START_SENSITIVITY_LOW',
+        },
+        activityHandling: 'ACTIVITY_HANDLING_UNSPECIFIED',
+        turnCoverage: 'TURN_INCLUDES_ALL_INPUT',
+      },
       tools: { functionDeclarations: [] },
       safetySettings: [
         { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
