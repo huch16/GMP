@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Syntax check
+        run: node --check src/index.js && node --check src/static.js
       - name: Deploy to Cloudflare Workers
         uses: cloudflare/wrangler-action@v3
         with:
