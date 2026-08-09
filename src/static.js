@@ -151,6 +151,7 @@ const jsFiles = {
     this.isScreenActive = false;
     this.cameraStream = null;
     this.screenStream = null;
+    this.frameIntervalMs = 1000;
   }
 
   getSampleRate() {
@@ -260,6 +261,7 @@ const jsFiles = {
       const video = document.createElement('video');
       video.srcObject = this.cameraStream;
       video.autoplay = true;
+      video.muted = true;
       const preview = document.getElementById('cameraPreview');
       preview.innerHTML = '';
       preview.appendChild(video);
@@ -286,12 +288,14 @@ const jsFiles = {
       const video = document.createElement('video');
       video.srcObject = this.screenStream;
       video.autoplay = true;
+      video.muted = true;
       const preview = document.getElementById('screenPreview');
       preview.innerHTML = '';
       preview.appendChild(video);
       preview.style.display = 'block';
       this.isScreenActive = true;
       this.screenStream.getVideoTracks()[0].onended = () => this.stopScreen();
+      this.captureFrame();
     } catch (e) {
       console.error('Screen share error:', e);
       this.onError?.('屏幕共享启动失败：' + (e.name || e.message || '请重试'));
@@ -307,21 +311,23 @@ const jsFiles = {
   }
 
   captureFrame() {
-    if (!this.isCameraActive || !this.cameraStream) return;
-    const video = document.querySelector('#cameraPreview video');
+    const camOn = this.isCameraActive && this.cameraStream;
+    const scrOn = this.isScreenActive && this.screenStream;
+    if (!camOn && !scrOn) return;
+    const video = document.querySelector(camOn ? '#cameraPreview video' : '#screenPreview video');
     if (video && video.readyState >= 2) {
       const canvas = document.createElement('canvas');
-      canvas.width = 320; canvas.height = 240;
-      canvas.getContext('2d').drawImage(video, 0, 0, 320, 240);
+      canvas.width = 640; canvas.height = 360;
+      canvas.getContext('2d').drawImage(video, 0, 0, 640, 360);
       canvas.toBlob((blob) => {
         if (blob) {
           const reader = new FileReader();
           reader.onloadend = () => { const base64 = reader.result.split(',')[1]; this.sendImage(base64); };
           reader.readAsDataURL(blob);
         }
-      }, 'image/jpeg', 0.5);
+      }, 'image/jpeg', 0.7);
     }
-    setTimeout(() => this.captureFrame(), this.frameIntervalMs || 5000);
+    setTimeout(() => this.captureFrame(), this.frameIntervalMs || 1000);
   }
 }
 
