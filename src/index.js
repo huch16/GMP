@@ -49,6 +49,17 @@ function checkAuth(request, env) {
   return auth === `Bearer ${env.ACCESS_TOKEN}`;
 }
 
+function normalizeWSData(data) {
+  if (typeof data === 'string') return data;
+  if (data !== null && typeof data === 'object') {
+    try {
+      if (data instanceof ArrayBuffer) return new TextDecoder().decode(data);
+      if (ArrayBuffer.isView(data)) return new TextDecoder().decode(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+    } catch (e) {}
+  }
+  return data;
+}
+
 function relay(proxy, upstream) {
   let pendingMessages = [];
   upstream.addEventListener('open', () => {
@@ -66,7 +77,7 @@ function relay(proxy, upstream) {
   });
   upstream.addEventListener('message', (event) => {
     if (proxy.readyState === WebSocket.OPEN) {
-      proxy.send(event.data);
+      proxy.send(normalizeWSData(event.data));
     }
   });
   upstream.addEventListener('close', (event) => {

@@ -157,6 +157,11 @@ const jsFiles = {
     return this.provider === 'minimax' ? 24000 : 16000;
   }
 
+  getTemperature() {
+    const v = parseFloat(localStorage.getItem('temperature'));
+    return Number.isFinite(v) ? v : 0.8;
+  }
+
   wsPath() {
     const p = this.provider === 'minimax' ? '/ws/minimax' : this.provider === 'glm' ? '/ws/glm' : '/ws/gemini';
     return p + (this.token ? '?token=' + encodeURIComponent(this.token) : '');
@@ -166,7 +171,14 @@ const jsFiles = {
     const wsUrl = 'wss://' + location.host + this.wsPath();
     this.ws = new WebSocket(wsUrl);
     this.ws.onopen = () => { this.isConnected = true; this.sendSetup(); };
-    this.ws.onmessage = (e) => this.handleMessage(e.data);
+    this.ws.onmessage = async (e) => {
+      let data = e.data;
+      try {
+        if (typeof Blob !== 'undefined' && data instanceof Blob) data = await data.text();
+        else if (typeof ArrayBuffer !== 'undefined' && data instanceof ArrayBuffer) data = new TextDecoder().decode(data);
+      } catch (err) {}
+      this.handleMessage(data);
+    };
     this.ws.onclose = (e) => {
       this.isConnected = false;
       this.onDisconnect?.();
@@ -324,7 +336,7 @@ class GeminiAgent extends RealtimeAgent {
     return {
       model: localStorage.getItem('model') || 'models/gemini-2.5-flash-native-audio-preview-12-2025',
       generationConfig: {
-        temperature: parseFloat(localStorage.getItem('temperature')) ?? 0.8,
+        temperature: this.getTemperature(),
         top_p: 0.95,
         top_k: 65,
         responseModalities: ['AUDIO'],
@@ -393,7 +405,7 @@ class MiniMaxAgent extends RealtimeAgent {
 
   sendSetup() {
     const voice = localStorage.getItem('voice') || 'female-yujie';
-    const temperature = parseFloat(localStorage.getItem('temperature')) ?? 0.8;
+    const temperature = this.getTemperature();
     const instructions = localStorage.getItem('systemInstructions') || 'You are a helpful assistant.';
     this.send({
       type: 'session.update',
@@ -487,7 +499,7 @@ class GLMAgent extends RealtimeAgent {
         instructions: localStorage.getItem('systemInstructions') || 'You are a helpful assistant.',
         input_audio_format: 'pcm16',
         output_audio_format: 'pcm',
-        temperature: parseFloat(localStorage.getItem('temperature')) ?? 0.8,
+        temperature: this.getTemperature(),
         turn_detection: { type: 'server_vad', create_response: true, interrupt_response: true },
         beta_fields: { chat_mode: chatMode, tts_source: 'e2e' },
       }
