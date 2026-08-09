@@ -5,3 +5,9 @@ compatibility_flags = ["nodejs_compat"]
 
 [observability]
 enabled = true
+
+# Required secrets (set via `wrangler secret put <NAME>`):
+#   GOOGLE_API_KEY   - Gemini Live API key (used by /ws/gemini and /v1/*)
+#   MINIMAX_API_KEY  - MiniMax Realtime API key (used by /ws/minimax)
+#   ZHIPU_API_KEY    - Zhipu GLM-Realtime API key (used by /ws/glm)
+#   ACCESS_TOKEN     - optional; when set, /v1/* and /ws/* require this token
