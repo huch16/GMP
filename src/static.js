@@ -300,6 +300,7 @@ const jsFiles = {
       preview.innerHTML = '';
       preview.appendChild(video);
       preview.style.display = 'block';
+      video.play().catch(() => {});
       this.isScreenActive = true;
       this.screenStream.getVideoTracks()[0].onended = () => this.stopScreen();
       this.captureFrame();
@@ -320,9 +321,16 @@ const jsFiles = {
   captureFrame() {
     const camOn = this.isCameraActive && this.cameraStream;
     const scrOn = this.isScreenActive && this.screenStream;
+    if (camOn) this.sendVideoFrame('#cameraPreview video');
+    if (scrOn) this.sendVideoFrame('#screenPreview video');
     if (!camOn && !scrOn) return;
-    const video = document.querySelector(camOn ? '#cameraPreview video' : '#screenPreview video');
-    if (video && video.readyState >= 2) {
+    setTimeout(() => this.captureFrame(), this.frameIntervalMs || 1000);
+  }
+
+  sendVideoFrame(selector) {
+    const video = document.querySelector(selector);
+    if (!video || video.readyState < 2) return;
+    try {
       const canvas = document.createElement('canvas');
       canvas.width = 640; canvas.height = 360;
       canvas.getContext('2d').drawImage(video, 0, 0, 640, 360);
@@ -333,8 +341,7 @@ const jsFiles = {
           reader.readAsDataURL(blob);
         }
       }, 'image/jpeg', 0.7);
-    }
-    setTimeout(() => this.captureFrame(), this.frameIntervalMs || 1000);
+    } catch (e) {}
   }
 }
 
