@@ -25,6 +25,10 @@ const indexHTML = `<!DOCTYPE html>
                 <span class="icon">📷</span>
                 <span class="label">Camera</span>
             </button>
+            <button id="flipBtn" class="source-btn" title="Switch Camera" style="display: none;">
+                <span class="icon">🔄</span>
+                <span class="label">Flip</span>
+            </button>
             <button id="screenBtn" class="source-btn" title="Screen Share">
                 <span class="icon">🖥️</span>
                 <span class="label">Screen</span>
@@ -151,6 +155,7 @@ const jsFiles = {
     this.isScreenActive = false;
     this.cameraStream = null;
     this.screenStream = null;
+    this.cameraFacing = 'user';
     this.frameIntervalMs = 1000;
   }
 
@@ -301,7 +306,7 @@ const jsFiles = {
 
   async startCamera() {
     try {
-      this.cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
+      this.cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: this.cameraFacing } });
       const video = document.createElement('video');
       video.srcObject = this.cameraStream;
       video.autoplay = true;
@@ -323,7 +328,18 @@ const jsFiles = {
   stopCamera() {
     this.isCameraActive = false;
     if (this.cameraStream) { this.cameraStream.getTracks().forEach(t => t.stop()); this.cameraStream = null; }
+    const flip = document.getElementById('flipBtn');
+    if (flip) flip.style.display = 'none';
     document.getElementById('cameraPreview').style.display = 'none';
+  }
+
+  async switchCamera() {
+    if (!this.isCameraActive || !this.cameraStream) return;
+    const prev = this.cameraFacing;
+    this.stopCamera();
+    this.cameraFacing = prev === 'user' ? 'environment' : 'user';
+    await this.startCamera();
+    if (!this.isCameraActive) this.cameraFacing = prev;
   }
 
   async startScreen() {
@@ -675,11 +691,24 @@ class ChatUI {
         this.addMessage('system', '麦克风已' + (this.agent.isMicActive ? '开启' : '关闭') + '（连接后生效）');
       }
     };
-    document.getElementById('cameraBtn').onclick = () => {
+    document.getElementById('cameraBtn').onclick = async () => {
       if (this.agent.provider === 'minimax') { alert('MiniMax Realtime 暂不支持视频输入'); return; }
       if (!this.agent.isConnected) { this.addMessage('system', '请先点击 Connect 建立连接'); return; }
       const btn = document.getElementById('cameraBtn');
-      if (this.agent.isCameraActive) { btn.classList.remove('active'); this.agent.stopCamera(); } else { btn.classList.add('active'); this.agent.startCamera(); }
+      const flip = document.getElementById('flipBtn');
+      if (this.agent.isCameraActive) { btn.classList.remove('active'); flip.style.display = 'none'; this.agent.stopCamera(); }
+      else {
+        btn.classList.add('active');
+        await this.agent.startCamera();
+        flip.style.display = this.agent.isCameraActive ? 'inline-flex' : 'none';
+        if (!this.agent.isCameraActive) btn.classList.remove('active');
+      }
+    };
+    document.getElementById('flipBtn').onclick = async () => {
+      const flip = document.getElementById('flipBtn');
+      flip.style.opacity = '0.5';
+      await this.agent.switchCamera();
+      flip.style.opacity = '1';
     };
     document.getElementById('screenBtn').onclick = () => {
       if (this.agent.provider === 'minimax') { alert('MiniMax Realtime 暂不支持屏幕共享'); return; }
