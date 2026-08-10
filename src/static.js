@@ -146,7 +146,7 @@ const jsFiles = {
     this.recordingStream = null;
     this.isConnected = false;
     this.isRecording = false;
-    this.isMicActive = localStorage.getItem('micEnabled') === 'true';
+    this.isMicActive = false;
     this.isCameraActive = false;
     this.isScreenActive = false;
     this.cameraStream = null;
@@ -236,7 +236,7 @@ const jsFiles = {
       }
       return;
     }
-    if (this.activityOpen && this.vadLastVoice && now - this.vadLastVoice > 1200) {
+    if (this.activityOpen && this.vadLastVoice && now - this.vadLastVoice > 700) {
       this.activityOpen = false;
       this.vadLastVoice = null;
       this.send({ realtimeInput: { activityEnd: {} } });
@@ -445,7 +445,7 @@ class GeminiAgent extends RealtimeAgent {
         }
       }
       if (msg.serverContent?.turnComplete) {
-        setTimeout(() => { this.modelSpeaking = false; this.vadLastVoice = null; }, 800);
+        setTimeout(() => { this.modelSpeaking = false; this.vadLastVoice = null; }, 600);
         this.onTurnComplete?.();
       }
       if (msg.serverContent?.interrupted) {
@@ -671,7 +671,6 @@ class ChatUI {
         btn.classList.toggle('active', this.agent.isMicActive);
         this.addMessage('system', '麦克风已' + (this.agent.isMicActive ? '开启' : '关闭') + '（连接后生效）');
       }
-      localStorage.setItem('micEnabled', this.agent.isMicActive);
     };
     document.getElementById('cameraBtn').onclick = () => {
       if (this.agent.provider === 'minimax') { alert('MiniMax Realtime 暂不支持视频输入'); return; }
@@ -708,7 +707,6 @@ class ChatUI {
     document.getElementById('tempValue').textContent = localStorage.getItem('temperature') || '0.8';
     document.getElementById('systemInput').value = localStorage.getItem('systemInstructions') || 'You are a helpful assistant.';
     document.getElementById('accessTokenInput').value = localStorage.getItem('accessToken') || '';
-    if (localStorage.getItem('micEnabled') === 'true') document.getElementById('micBtn').classList.add('active');
 
     this.agent.onConnect = () => { document.getElementById('connectBtn').style.display = 'none'; document.getElementById('disconnectBtn').style.display = 'block'; };
     this.agent.onDisconnect = () => { document.getElementById('connectBtn').style.display = 'block'; document.getElementById('disconnectBtn').style.display = 'none'; };
