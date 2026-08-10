@@ -223,12 +223,23 @@ const jsFiles = {
     let sum = 0;
     for (let i = 0; i < inputData.length; i++) sum += inputData[i] * inputData[i];
     const rms = Math.sqrt(sum / inputData.length);
-    if (rms > 0.008) this.vadLastVoice = now;
-    if (this.modelSpeaking) return;
-    if (this.vadLastVoice && !this.vadPending && now - this.vadLastVoice > 1200) {
-      this.vadPending = true;
-      this.onVoiceSilence?.();
-      setTimeout(() => { this.vadPending = false; this.vadLastVoice = null; }, 400);
+    const voiceActive = rms > 0.008;
+    if (this.modelSpeaking) {
+      if (voiceActive) this.vadLastVoice = now;
+      return;
+    }
+    if (voiceActive) {
+      this.vadLastVoice = now;
+      if (!this.activityOpen) {
+        this.activityOpen = true;
+        this.send({ realtimeInput: { activityStart: {} } });
+      }
+      return;
+    }
+    if (this.activityOpen && this.vadLastVoice && now - this.vadLastVoice > 1200) {
+      this.activityOpen = false;
+      this.vadLastVoice = null;
+      this.send({ realtimeInput: { activityEnd: {} } });
     }
   }
 
@@ -249,8 +260,8 @@ const jsFiles = {
         if (!this.isRecording) return;
         const inputData = e.inputBuffer.getChannelData(0);
         const pcm = this.floatTo16BitPCM(inputData);
-        this.sendAudio(pcm);
         this.trackVoiceActivity(inputData);
+        this.sendAudio(pcm);
       };
       source.connect(this.scriptProcessor);
       this.micGain = this.audioContext.createGain();
@@ -259,6 +270,7 @@ const jsFiles = {
       this.micGain.connect(this.audioContext.destination);
       this.vadLastVoice = null;
       this.vadPending = false;
+      this.activityOpen = false;
       this.modelSpeaking = false;
       this.isRecording = true;
       return true;
@@ -274,6 +286,10 @@ const jsFiles = {
 
   stopRecording() {
     this.isRecording = false;
+    if (this.activityOpen) {
+      this.activityOpen = false;
+      this.send({ realtimeInput: { activityEnd: {} } });
+    }
     if (this.scriptProcessor) { this.scriptProcessor.disconnect(); this.scriptProcessor = null; }
     if (this.micGain) { this.micGain.disconnect(); this.micGain = null; }
     if (this.recordingStream) { this.recordingStream.getTracks().forEach(t => t.stop()); this.recordingStream = null; }
@@ -400,12 +416,6 @@ class GeminiAgent extends RealtimeAgent {
 
   sendText(text) {
     this.send({ clientContent: { turns: [{ role: 'user', parts: [{ text }] }], turnComplete: true } });
-  }
-
-  onVoiceSilence() {
-    if (this.isConnected) {
-      this.send({ clientContent: { turns: [{ role: 'user', parts: [{ text: '' }] }], turnComplete: true } });
-    }
   }
 
   sendAudio(pcmData) {
