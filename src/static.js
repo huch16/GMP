@@ -195,6 +195,9 @@ const jsFiles = {
     this.stopRecording();
     this.stopCamera();
     this.stopScreen();
+    this.pcmBuffer = [];
+    this.audioPlaying = false;
+    if (this.playPendingTimer) { clearTimeout(this.playPendingTimer); this.playPendingTimer = null; }
   }
 
   send(data) { if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(data)); }
@@ -776,29 +779,45 @@ class ChatUI {
   }
 
   playPcm(buffer, sampleRate) {
-    this.audioQueue = this.audioQueue || [];
-    this.audioQueue.push({ buffer, sampleRate });
+    if (!this.audioCtx) this.setupAudioPipeline();
+    if (!this.pcmBuffer) { this.pcmBuffer = []; this.pcmSampleRate = sampleRate || 24000; }
+    this.pcmBuffer.push(buffer);
+    this.pcmSampleRate = sampleRate || this.pcmSampleRate;
     if (this.audioPlaying) return;
-    this.audioPlaying = true;
-    this.playNext();
+    if (this.playPendingTimer) return;
+    this.playPendingTimer = setTimeout(() => {
+      this.playPendingTimer = null;
+      this.audioPlaying = true;
+      this.flushAndPlay();
+    }, 250);
   }
 
-  playNext() {
-    const item = this.audioQueue.shift();
-    if (!item) { this.audioPlaying = false; return; }
+  flushAndPlay() {
+    const chunks = this.pcmBuffer || [];
+    this.pcmBuffer = [];
+    if (!chunks.length) { this.audioPlaying = false; return; }
+    let total = 0;
+    for (const c of chunks) total += c.byteLength;
+    const merged = new Uint8Array(total);
+    let off = 0;
+    for (const c of chunks) { merged.set(new Uint8Array(c), off); off += c.byteLength; }
     const ctx = this.audioCtx || new (window.AudioContext || window.webkitAudioContext)();
     if (ctx.state === 'suspended') ctx.resume();
-    const view = new DataView(item.buffer);
+    const view = new DataView(merged.buffer);
     const frameCount = view.byteLength / 2;
-    const audioBuffer = ctx.createBuffer(1, frameCount, item.sampleRate || 24000);
+    const audioBuffer = ctx.createBuffer(1, frameCount, this.pcmSampleRate || 24000);
     const data = audioBuffer.getChannelData(0);
-    for (let i = 0; i < frameCount; i++) {
-      data[i] = view.getInt16(i * 2, true) / 32768;
-    }
+    for (let i = 0; i < frameCount; i++) data[i] = view.getInt16(i * 2, true) / 32768;
     const source = ctx.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(this.gainNode || ctx.destination);
-    source.onended = () => this.playNext();
+    source.onended = () => {
+      if (this.pcmBuffer && this.pcmBuffer.length) {
+        this.flushAndPlay();
+      } else {
+        this.audioPlaying = false;
+      }
+    };
     source.start();
   }
 }
