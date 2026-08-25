@@ -10,6 +10,15 @@ const indexHTML = `<!DOCTYPE html>
     <div class="app-container">
         <div class="header">
             <h1>GMP Realtime Playground</h1>
+            <div class="role-selector">
+                <button id="roleBtn" class="role-btn">
+                    <span id="roleAvatar">🤖</span>
+                    <span id="roleName">通用助手</span>
+                    <span class="caret">▾</span>
+                </button>
+                <button id="manageRolesBtn" class="role-manage-btn" title="管理角色">⚙️</button>
+                <div id="roleMenu" class="role-menu hidden"></div>
+            </div>
             <div class="controls">
                 <button id="settingsBtn" class="settings-btn">⚙️</button>
                 <button id="connectBtn" class="connect-btn">Connect</button>
@@ -135,7 +144,35 @@ button { cursor: pointer; font-family: inherit; }
 .btn-primary { background: var(--accent); color: white; }
 .btn-secondary { background: var(--bg-tertiary); color: var(--text-primary); }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-@media (max-width: 600px) { .app-container { padding: 10px; } .header h1 { font-size: 1.2rem; } .source-btn { padding: 8px 12px; } .source-btn .icon { font-size: 1.2rem; } }`};
+@media (max-width: 600px) { .app-container { padding: 10px; } .header h1 { font-size: 1.2rem; } .source-btn { padding: 8px 12px; } .source-btn .icon { font-size: 1.2rem; } }
+
+/* Role selector */
+.role-selector { position: relative; display: flex; align-items: center; gap: 6px; }
+.role-btn { display: flex; align-items: center; gap: 4px; padding: 6px 10px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-weight: 500; cursor: pointer; }
+.role-btn:hover { background: var(--accent); }
+.role-btn .caret { font-size: 0.8rem; opacity: 0.8; }
+.role-manage-btn { background: none; border: none; color: var(--text-primary); cursor: pointer; font-size: 1.1rem; }
+.role-manage-btn:hover { color: var(--accent); }
+.role-menu { position: absolute; top: 100%; left: 0; margin-top: 4px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; width: 260px; max-height: 300px; overflow-y: auto; z-index: 1000; }
+.role-menu.hidden { display: none; }
+.role-menu-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; cursor: pointer; }
+.role-menu-item:hover { background: var(--bg-tertiary); }
+.role-menu-item .avatar { font-size: 1.2rem; }
+.role-menu-item .meta { display: flex; flex-direction: column; }
+.role-menu-item .meta .name { font-weight: 600; }
+.role-menu-item .meta .desc { font-size: 0.75rem; color: var(--text-secondary); }
+
+/* Role modal */
+.role-list { max-height: 260px; overflow-y: auto; margin-bottom: 12px; }
+.role-list-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.role-list-item:hover { background: var(--bg-tertiary); }
+.role-list-item.active { background: var(--accent); color: white; }
+.role-edit { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.role-edit.hidden { display: none; }
+.role-edit label { display: flex; flex-direction: column; gap: 4px; color: var(--text-secondary); }
+.role-edit input, .role-edit textarea { width: 100%; padding: 6px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); }
+.role-edit-actions { display: flex; gap: 8px; margin-top: 8px; }
+`};
 
 const jsFiles = {
   'js/script.js': `class RealtimeAgent {
@@ -255,15 +292,15 @@ const jsFiles = {
     try {
       this.recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       try {
-        this.audioContext = new AudioContext({ sampleRate: this.sampleRate });
+        this.audioContext = new AudioContext({ sampleRate: this.sampleRate, latencyHint: 'interactive' });
       } catch (e) {
-        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        this.audioContext = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
       }
       try { if (this.audioContext.state === 'suspended') this.audioContext.resume(); } catch (e) {}
       const source = this.audioContext.createMediaStreamSource(this.recordingStream);
       this.analyser = this.audioContext.createAnalyser();
       source.connect(this.analyser);
-      this.scriptProcessor = this.audioContext.createScriptProcessor(4096, 1, 1);
+      this.scriptProcessor = this.audioContext.createScriptProcessor(2048, 1, 1);
       this.scriptProcessor.onaudioprocess = (e) => {
         if (!this.isRecording) return;
         const inputData = e.inputBuffer.getChannelData(0);
@@ -656,6 +693,7 @@ class GLMAgent extends RealtimeAgent {
 class ChatUI {
   constructor() {
     this.agent = this.createAgent();
+    this.agent.isMicActive = false;
     this.setupEventListeners();
     this.audioCtx = null;
     this.gainNode = null;
@@ -767,6 +805,7 @@ class ChatUI {
     localStorage.setItem('voice', document.getElementById('voiceInput').value);
     localStorage.setItem('temperature', document.getElementById('tempInput').value);
     localStorage.setItem('systemInstructions', document.getElementById('systemInput').value);
+    if (window.roleManager) window.roleManager.updateCurrentSystemPrompt(document.getElementById('systemInput').value);
     localStorage.setItem('accessToken', document.getElementById('accessTokenInput').value);
     this.agent.disconnect();
     this.agent = this.createAgent();
@@ -800,7 +839,7 @@ class ChatUI {
   }
 
   setupAudioPipeline() {
-    this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    this.audioCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
     if (this.audioCtx.state === 'suspended') this.audioCtx.resume();
     this.gainNode = this.audioCtx.createGain();
     this.gainNode.connect(this.audioCtx.destination);
@@ -812,13 +851,10 @@ class ChatUI {
     if (!this.pcmBuffer) { this.pcmBuffer = []; this.pcmSampleRate = sampleRate || 24000; }
     this.pcmBuffer.push(buffer);
     this.pcmSampleRate = sampleRate || this.pcmSampleRate;
-    if (this.audioPlaying) return;
-    if (this.playPendingTimer) return;
-    this.playPendingTimer = setTimeout(() => {
-      this.playPendingTimer = null;
+    if (!this.audioPlaying) {
       this.audioPlaying = true;
       this.flushAndPlay();
-    }, 250);
+    }
   }
 
   flushAndPlay() {
@@ -850,6 +886,179 @@ class ChatUI {
     source.start();
   }
 }
+
+/* ----------------------------------------------------------------------
+ * 🎭 Role Management (frontend only)
+ * ---------------------------------------------------------------------- */
+const DEFAULT_ROLES = [
+  { id: 'assistant',   name: '通用助手',   avatar: '🤖', description: '友好、乐于助人，适用于日常问答。', systemPrompt: 'You are a helpful assistant.' },
+  { id: 'code',        name: '代码专家',   avatar: '👨‍💻', description: '擅长解释、编写、调试代码。', systemPrompt: 'You are an expert programmer. Provide concise, correct code snippets with explanations.' },
+  { id: 'translator',  name: '古文翻译',   avatar: '📜', description: '专注古文/白话文互译，保留原文意境。', systemPrompt: 'You are a translator specializing in classical Chinese ↔ modern Chinese. Preserve nuance and tone.' },
+  { id: 'poet',        name: '古诗创作',   avatar: '🖋️', description: '以古诗格律创作唐诗、宋词。', systemPrompt: 'You are a poet skilled in classical Chinese poetry. Compose regulated verses in the style of Tang and Song dynasties, respecting rhyme and tonal patterns.' },
+  { id: 'psychologist',name: '心理咨询师', avatar: '🧠', description: '提供情感支持与倾听。', systemPrompt: 'You are an empathetic psychologist. Listen actively, give supportive feedback, and never give medical advice.' },
+  { id: 'custom',      name: '自定义',     avatar: '✏️', description: '自行编辑系统指令。', systemPrompt: '' }
+];
+
+class RoleManager {
+  constructor() {
+    this.storageKey = 'gmp_roles_v1';
+    this.currentKey = 'gmp_current_role_v1';
+    this.roles = this.loadRoles();
+    this.currentRoleId = localStorage.getItem(this.currentKey) || this.roles[0].id;
+    this.editingId = null;
+    this.renderCurrent();
+    this.populateMenu();
+    this.attachEvents();
+  }
+
+  loadRoles() {
+    let stored = [];
+    try { stored = JSON.parse(localStorage.getItem(this.storageKey) || '[]'); } catch(e) {}
+    const map = new Map();
+    DEFAULT_ROLES.forEach(r => map.set(r.id, { ...r }));
+    stored.forEach(r => map.set(r.id, r));
+    return Array.from(map.values());
+  }
+  saveRoles() { localStorage.setItem(this.storageKey, JSON.stringify(this.roles)); }
+
+  getCurrent() { return this.roles.find(r => r.id === this.currentRoleId) || this.roles[0]; }
+  setCurrent(id) {
+    if (!this.roles.find(r => r.id === id)) return;
+    this.currentRoleId = id;
+    localStorage.setItem(this.currentKey, id);
+    this.renderCurrent();
+    this.populateMenu();
+    const role = this.getCurrent();
+    const sysInput = document.getElementById('systemInput');
+    if (sysInput) {
+      sysInput.value = role.systemPrompt;
+      localStorage.setItem('systemInstructions', role.systemPrompt);
+    }
+  }
+  updateCurrentSystemPrompt(text) {
+    const role = this.getCurrent();
+    role.systemPrompt = text;
+    this.saveRoles();
+  }
+
+  renderCurrent() {
+    const role = this.getCurrent();
+    const av = document.getElementById('roleAvatar');
+    const nm = document.getElementById('roleName');
+    if (av) av.textContent = role.avatar;
+    if (nm) nm.textContent = role.name;
+  }
+
+  populateMenu() {
+    const menu = document.getElementById('roleMenu');
+    if (!menu) return;
+    menu.innerHTML = '';
+    this.roles.forEach(r => {
+      const item = document.createElement('div');
+      item.className = 'role-menu-item';
+      if (r.id === this.currentRoleId) item.style.background = 'rgba(233,69,96,0.2)';
+      item.innerHTML = `<span class="avatar">${r.avatar}</span><div class="meta"><span class="name">${r.name}</span><span class="desc">${r.description}</span></div>`;
+      item.onclick = () => { this.setCurrent(r.id); menu.classList.add('hidden'); };
+      menu.appendChild(item);
+    });
+  }
+
+  attachEvents() {
+    const btn = document.getElementById('roleBtn');
+    const menu = document.getElementById('roleMenu');
+    const manageBtn = document.getElementById('manageRolesBtn');
+    if (btn) btn.onclick = (e) => { e.stopPropagation(); menu.classList.toggle('hidden'); };
+    document.addEventListener('click', (e) => { if (!menu.contains(e.target) && e.target !== btn) menu.classList.add('hidden'); });
+    if (manageBtn) manageBtn.onclick = () => this.openModal();
+    document.getElementById('closeRoleModal').onclick = () => this.closeModal();
+    document.getElementById('newRoleBtn').onclick = () => this.startCreate();
+    document.getElementById('saveRoleBtn').onclick = () => this.saveEdit();
+    document.getElementById('deleteRoleBtn').onclick = () => this.deleteRole();
+    document.getElementById('cancelRoleBtn').onclick = () => this.cancelEdit();
+  }
+
+  openModal() {
+    document.getElementById('roleModal').classList.add('active');
+    this.renderList();
+    this.cancelEdit();
+  }
+  closeModal() { document.getElementById('roleModal').classList.remove('active'); }
+
+  renderList() {
+    const list = document.getElementById('roleList');
+    list.innerHTML = '';
+    this.roles.forEach(r => {
+      const item = document.createElement('div');
+      item.className = 'role-list-item' + (r.id === this.currentRoleId ? ' active' : '');
+      item.innerHTML = `<span style="font-size:1.2rem;">${r.avatar}</span><div style="flex:1;"><div style="font-weight:600;">${r.name}</div><div style="font-size:.75rem;color:#a0a0a0;">${r.description}</div></div>`;
+      item.onclick = () => this.startEdit(r.id);
+      list.appendChild(item);
+    });
+  }
+
+  startEdit(id) {
+    this.editingId = id;
+    const role = this.roles.find(r => r.id === id);
+    document.getElementById('roleEdit').classList.remove('hidden');
+    document.getElementById('roleNameInput').value = role.name;
+    document.getElementById('roleAvatarInput').value = role.avatar;
+    document.getElementById('roleDescInput').value = role.description;
+    document.getElementById('rolePromptInput').value = role.systemPrompt;
+    const isBuiltIn = DEFAULT_ROLES.some(d => d.id === id);
+    document.getElementById('deleteRoleBtn').style.display = (isBuiltIn && id !== 'custom') ? 'none' : 'inline-block';
+  }
+
+  startCreate() {
+    const id = 'custom_' + Date.now();
+    const newRole = { id, name: '新角色', avatar: '✨', description: '自行编辑描述', systemPrompt: '' };
+    this.roles.push(newRole);
+    this.saveRoles();
+    this.renderList();
+    this.startEdit(id);
+  }
+
+  saveEdit() {
+    if (!this.editingId) return;
+    const role = this.roles.find(r => r.id === this.editingId);
+    role.name = document.getElementById('roleNameInput').value.trim() || role.name;
+    role.avatar = document.getElementById('roleAvatarInput').value.trim() || role.avatar;
+    role.description = document.getElementById('roleDescInput').value.trim();
+    role.systemPrompt = document.getElementById('rolePromptInput').value;
+    this.saveRoles();
+    if (role.id === this.currentRoleId) this.setCurrent(role.id);
+    this.renderList();
+    this.cancelEdit();
+  }
+
+  deleteRole() {
+    if (!this.editingId) return;
+    const role = this.roles.find(r => r.id === this.editingId);
+    if (!role) return;
+    if (!confirm('确定删除角色 “' + role.name + '” 吗？')) return;
+    this.roles = this.roles.filter(r => r.id !== this.editingId);
+    this.saveRoles();
+    if (this.currentRoleId === this.editingId) {
+      this.currentRoleId = this.roles[0].id;
+      localStorage.setItem(this.currentKey, this.currentRoleId);
+      this.renderCurrent();
+      this.setCurrent(this.currentRoleId);
+    }
+    this.renderList();
+    this.cancelEdit();
+  }
+
+  cancelEdit() {
+    this.editingId = null;
+    document.getElementById('roleEdit').classList.add('hidden');
+  }
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  window.roleManager = new RoleManager();
+  const role = window.roleManager.getCurrent();
+  const sysInput = document.getElementById('systemInput');
+  if (sysInput) sysInput.value = role.systemPrompt;
+});
 
 const ui = new ChatUI();`};
 export { indexHTML, cssFiles, jsFiles };
