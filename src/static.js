@@ -1,15 +1,16 @@
 const indexHTML = `<!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>GMP - Realtime Playground</title>
     <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
     <div class="app-container">
-        <div class="header">
-            <h1>GMP Realtime Playground</h1>
+        <!-- Top bar -->
+        <header class="app-header">
+            <h1 class="app-title">GMP Playground</h1>
             <div class="role-selector">
                 <button id="roleBtn" class="role-btn">
                     <span id="roleAvatar">🤖</span>
@@ -19,41 +20,49 @@ const indexHTML = `<!DOCTYPE html>
                 <button id="manageRolesBtn" class="role-manage-btn" title="管理角色">⚙️</button>
                 <div id="roleMenu" class="role-menu hidden"></div>
             </div>
-            <div class="controls">
-                <button id="settingsBtn" class="settings-btn">⚙️</button>
+            <div class="connect-controls">
                 <button id="connectBtn" class="connect-btn">Connect</button>
-                <button id="disconnectBtn" class="disconnect-btn" style="display: none;">Disconnect</button>
+                <button id="disconnectBtn" class="disconnect-btn" style="display:none;">Disconnect</button>
             </div>
-        </div>
-        <div class="input-sources">
-            <button id="micBtn" class="source-btn active" title="Microphone">
-                <span class="icon">🎤</span>
-                <span class="label">Mic</span>
-            </button>
-            <button id="cameraBtn" class="source-btn" title="Camera">
-                <span class="icon">📷</span>
-                <span class="label">Camera</span>
-            </button>
-            <button id="flipBtn" class="source-btn" title="Switch Camera" style="display: none;">
-                <span class="icon">🔄</span>
-                <span class="label">Flip</span>
-            </button>
-            <button id="screenBtn" class="source-btn" title="Screen Share">
-                <span class="icon">🖥️</span>
-                <span class="label">Screen</span>
-            </button>
-        </div>
-        <div id="chatHistory" class="chat-history"></div>
-        <div class="visualizer-container">
-            <canvas id="visualizer" class="visualizer"></canvas>
-        </div>
-        <div id="cameraPreview" class="camera-preview"></div>
-        <div id="screenPreview" class="screen-preview"></div>
-        <div class="text-input-container">
-            <input type="text" id="messageInput" placeholder="Type your message..." class="text-input">
+        </header>
+
+        <!-- Chat area -->
+        <main class="chat-area">
+            <div id="chatHistory" class="chat-history"></div>
+            <div class="visualizer-container">
+                <canvas id="visualizer" class="visualizer"></canvas>
+            </div>
+            <div id="cameraPreview" class="camera-preview"></div>
+            <div id="screenPreview" class="screen-preview"></div>
+        </main>
+
+        <!-- Input area -->
+        <footer class="input-area">
+            <input type="text" id="messageInput" placeholder="输入消息..." class="text-input">
             <button id="sendBtn" class="send-btn">➤</button>
-        </div>
+        </footer>
+
+        <!-- Bottom navigation -->
+        <nav class="bottom-nav">
+            <button id="micBtn" class="nav-btn" title="麦克风">
+                <span class="icon">🎤</span>
+            </button>
+            <button id="cameraBtn" class="nav-btn" title="摄像头">
+                <span class="icon">📷</span>
+            </button>
+            <button id="flipBtn" class="nav-btn" title="切换摄像头" style="display:none;">
+                <span class="icon">🔄</span>
+            </button>
+            <button id="screenBtn" class="nav-btn" title="屏幕共享">
+                <span class="icon">🖥️</span>
+            </button>
+            <button id="settingsBtn" class="nav-btn" title="设置">
+                <span class="icon">⚙️</span>
+            </button>
+        </nav>
     </div>
+
+    <!-- Settings modal -->
     <div id="settingsModal" class="modal">
         <div class="modal-content">
             <h2>Settings</h2>
@@ -85,6 +94,28 @@ const indexHTML = `<!DOCTYPE html>
             <button id="closeSettings" class="btn-secondary">Close</button>
         </div>
     </div>
+
+    <!-- Role modal -->
+    <div id="roleModal" class="modal">
+        <div class="modal-content">
+            <h2>角色管理</h2>
+            <div id="roleList" class="role-list"></div>
+            <button id="newRoleBtn" class="btn-primary">+ 新建角色</button>
+            <div id="roleEdit" class="role-edit hidden">
+                <label>名称: <input id="roleNameInput" type="text"></label>
+                <label>头像 (emoji): <input id="roleAvatarInput" type="text" maxlength="2"></label>
+                <label>描述: <textarea id="roleDescInput" rows="2"></textarea></label>
+                <label>系统指令: <textarea id="rolePromptInput" rows="6"></textarea></label>
+                <div class="role-edit-actions">
+                    <button id="saveRoleBtn" class="btn-primary">保存</button>
+                    <button id="deleteRoleBtn" class="btn-secondary">删除</button>
+                    <button id="cancelRoleBtn" class="btn-secondary">取消</button>
+                </div>
+            </div>
+            <button id="closeRoleModal" class="btn-secondary">关闭</button>
+        </div>
+    </div>
+
     <script src="/js/script.js"></script>
 </body>
 </html>`;
@@ -102,58 +133,68 @@ const cssFiles = {
     --success: #4ade80;
     --border: #2a2a4a;
 }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-primary); color: var(--text-primary); min-height: 100vh; }
-.app-container { max-width: 900px; margin: 0 auto; padding: 20px; display: flex; flex-direction: column; height: 100vh; }
-.header { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
-.header h1 { font-size: 1.5rem; background: linear-gradient(135deg, var(--accent), #ff8c00); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-.controls { display: flex; gap: 10px; }
-.source-btn { display: flex; flex-direction: column; align-items: center; padding: 12px 20px; background: var(--bg-secondary); border: 2px solid var(--border); border-radius: 12px; cursor: pointer; transition: all 0.2s; }
-.source-btn:hover { background: var(--bg-tertiary); }
-.source-btn.active { border-color: var(--accent); background: rgba(233, 69, 96, 0.1); }
-.source-btn .icon { font-size: 1.5rem; }
-.source-btn .label { font-size: 0.75rem; margin-top: 4px; color: var(--text-secondary); }
-.input-sources { display: flex; gap: 10px; margin: 15px 0; }
-.chat-history { flex: 1; overflow-y: auto; padding: 15px; background: var(--bg-secondary); border-radius: 12px; margin-bottom: 15px; }
-.message { padding: 12px 16px; border-radius: 12px; margin-bottom: 10px; max-width: 85%; animation: fadeIn 0.3s ease; }
-.user-message { background: var(--bg-tertiary); margin-left: auto; }
-.assistant-message { background: var(--accent); color: white; }
-.system-message { background: #333; color: #ffd75e; text-align: center; font-size: 0.85rem; margin: 4px auto; }
-.visualizer-container { position: fixed; bottom: 80px; right: 20px; width: 60px; height: 60px; }
-.visualizer { width: 100%; height: 100%; border-radius: 50%; background: var(--bg-secondary); }
-.camera-preview, .screen-preview { position: fixed; bottom: 100px; left: 20px; width: 200px; height: 150px; background: var(--bg-secondary); border-radius: 12px; border: 2px solid var(--border); display: none; overflow: hidden; }
-.camera-preview video, .screen-preview video { width: 100%; height: 100%; object-fit: cover; }
-.text-input-container { display: flex; gap: 10px; padding: 15px; background: var(--bg-secondary); border-radius: 12px; }
-.text-input { flex: 1; padding: 12px 16px; background: var(--bg-primary); border: 2px solid var(--border); border-radius: 8px; color: var(--text-primary); font-size: 1rem; }
-.text-input:focus { outline: none; border-color: var(--accent); }
-.send-btn { padding: 12px 24px; background: var(--accent); border: none; border-radius: 8px; color: white; font-size: 1.2rem; cursor: pointer; transition: background 0.2s; }
-.send-btn:hover { background: var(--accent-hover); }
-button { cursor: pointer; font-family: inherit; }
-.disconnect-btn, .connect-btn, .settings-btn { padding: 10px 20px; border: none; border-radius: 8px; font-weight: 600; transition: all 0.2s; }
-.disconnect-btn { background: var(--accent); color: white; }
-.connect-btn { background: var(--success); color: var(--bg-primary); }
-.settings-btn { background: var(--bg-tertiary); color: var(--text-primary); font-size: 1.2rem; }
-.modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: none; justify-content: center; align-items: center; z-index: 1000; }
-.modal.active { display: flex; }
-.modal-content { background: var(--bg-secondary); padding: 30px; border-radius: 16px; width: 90%; max-width: 500px; }
-.modal-content h2 { margin-bottom: 20px; color: var(--accent); }
-.modal-content label { display: block; margin-bottom: 15px; color: var(--text-secondary); }
-.modal-content input, .modal-content select, .modal-content textarea { width: 100%; padding: 10px; margin-top: 5px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); }
-.modal-content textarea { resize: vertical; }
-.modal-content .hint { font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 15px; }
-.btn-primary, .btn-secondary { padding: 12px 24px; border: none; border-radius: 8px; font-weight: 600; margin-right: 10px; }
-.btn-primary { background: var(--accent); color: white; }
-.btn-secondary { background: var(--bg-tertiary); color: var(--text-primary); }
-@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-@media (max-width: 600px) { .app-container { padding: 10px; } .header h1 { font-size: 1.2rem; } .source-btn { padding: 8px 12px; } .source-btn .icon { font-size: 1.2rem; } }
-
-/* Role selector */
-.role-selector { position: relative; display: flex; align-items: center; gap: 6px; }
-.role-btn { display: flex; align-items: center; gap: 4px; padding: 6px 10px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-weight: 500; cursor: pointer; }
+html, body { height: 100%; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    overflow: hidden;
+}
+.app-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    max-width: 100%;
+    margin: 0 auto;
+}
+.app-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.app-title {
+    font-size: 1.1rem;
+    background: linear-gradient(135deg, var(--accent), #ff8c00);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.role-selector { display: flex; align-items: center; gap: 6px; margin-right: 8px; }
+.role-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    cursor: pointer;
+}
 .role-btn:hover { background: var(--accent); }
-.role-btn .caret { font-size: 0.8rem; opacity: 0.8; }
+.role-btn .caret { font-size: 0.8rem; opacity: .8; }
 .role-manage-btn { background: none; border: none; color: var(--text-primary); cursor: pointer; font-size: 1.1rem; }
 .role-manage-btn:hover { color: var(--accent); }
-.role-menu { position: absolute; top: 100%; left: 0; margin-top: 4px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; width: 260px; max-height: 300px; overflow-y: auto; z-index: 1000; }
+.role-menu {
+    position: absolute;
+    top: 48px;
+    right: 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    width: 260px;
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 1500;
+}
 .role-menu.hidden { display: none; }
 .role-menu-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; cursor: pointer; }
 .role-menu-item:hover { background: var(--bg-tertiary); }
@@ -162,16 +203,195 @@ button { cursor: pointer; font-family: inherit; }
 .role-menu-item .meta .name { font-weight: 600; }
 .role-menu-item .meta .desc { font-size: 0.75rem; color: var(--text-secondary); }
 
-/* Role modal */
-.role-list { max-height: 260px; overflow-y: auto; margin-bottom: 12px; }
-.role-list-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.connect-controls { display: flex; gap: 8px; }
+.connect-btn, .disconnect-btn {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.connect-btn { background: var(--success); color: var(--bg-primary); }
+.disconnect-btn { background: var(--accent); color: white; }
+
+.chat-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+}
+.chat-history {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px;
+    background: var(--bg-primary);
+}
+.message {
+    padding: 8px 12px;
+    border-radius: 12px;
+    margin-bottom: 8px;
+    max-width: 85%;
+    word-wrap: break-word;
+    animation: fadeIn 0.3s ease;
+}
+.user-message { background: var(--bg-tertiary); margin-left: auto; }
+.assistant-message { background: var(--accent); color: white; }
+.system-message { background: #333; color: #ffd75e; text-align: center; font-size: 0.85rem; margin: 4px auto; }
+
+.visualizer-container {
+    position: absolute;
+    bottom: 120px;
+    right: 12px;
+    width: 50px;
+    height: 50px;
+}
+.visualizer {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: var(--bg-secondary);
+}
+.camera-preview, .screen-preview {
+    position: absolute;
+    bottom: 120px;
+    left: 12px;
+    width: 140px;
+    height: 90px;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    border: 2px solid var(--border);
+    display: none;
+    overflow: hidden;
+}
+.camera-preview video, .screen-preview video { width: 100%; height: 100%; object-fit: cover; }
+
+.input-area {
+    display: flex;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.text-input {
+    flex: 1;
+    padding: 8px 12px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    color: var(--text-primary);
+    font-size: 1rem;
+}
+.text-input:focus { outline: none; border-color: var(--accent); }
+.send-btn {
+    padding: 8px 12px;
+    background: var(--accent);
+    border: none;
+    border-radius: 20px;
+    color: white;
+    font-size: 1.2rem;
+    cursor: pointer;
+}
+.send-btn:hover { background: var(--accent-hover); }
+
+.bottom-nav {
+    display: flex;
+    justify-content: space-around;
+    padding: 8px 0;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.nav-btn {
+    flex: 1;
+    background: none;
+    color: var(--text-primary);
+    font-size: 1.4rem;
+    padding: 6px;
+    border: none;
+    cursor: pointer;
+}
+.nav-btn:hover { color: var(--accent); }
+.nav-btn.active { color: var(--accent); }
+
+.modal {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0,0,0,0.8);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 2000;
+}
+.modal.active { display: flex; }
+.modal-content {
+    background: var(--bg-secondary);
+    padding: 20px;
+    border-radius: 12px;
+    width: 90%;
+    max-width: 500px;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+.modal-content h2 { margin-bottom: 16px; color: var(--accent); }
+.modal-content label { display: block; margin-bottom: 12px; color: var(--text-secondary); }
+.modal-content input, .modal-content select, .modal-content textarea {
+    width: 100%;
+    padding: 8px;
+    margin-top: 4px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-primary);
+}
+.modal-content textarea { resize: vertical; }
+.modal-content .hint { font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 12px; }
+.btn-primary, .btn-secondary {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    margin-right: 8px;
+    cursor: pointer;
+}
+.btn-primary { background: var(--accent); color: white; }
+.btn-secondary { background: var(--bg-tertiary); color: var(--text-primary); }
+
+.role-list { max-height: 200px; overflow-y: auto; margin-bottom: 12px; }
+.role-list-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+}
 .role-list-item:hover { background: var(--bg-tertiary); }
 .role-list-item.active { background: var(--accent); color: white; }
 .role-edit { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
 .role-edit.hidden { display: none; }
 .role-edit label { display: flex; flex-direction: column; gap: 4px; color: var(--text-secondary); }
-.role-edit input, .role-edit textarea { width: 100%; padding: 6px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); }
+.role-edit input, .role-edit textarea {
+    width: 100%;
+    padding: 6px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+}
 .role-edit-actions { display: flex; gap: 8px; margin-top: 8px; }
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+@media (max-width: 480px) {
+    .app-title { font-size: 1rem; }
+    .role-btn { padding: 4px 6px; font-size: 0.85rem; }
+    .visualizer-container { width: 40px; height: 40px; bottom: 110px; right: 8px; }
+    .camera-preview, .screen-preview { width: 120px; height: 80px; bottom: 110px; left: 8px; }
+    .nav-btn { font-size: 1.2rem; }
+}
 `};
 
 const jsFiles = {
@@ -957,7 +1177,7 @@ class RoleManager {
       const item = document.createElement('div');
       item.className = 'role-menu-item';
       if (r.id === this.currentRoleId) item.style.background = 'rgba(233,69,96,0.2)';
-      item.innerHTML = `<span class="avatar">${r.avatar}</span><div class="meta"><span class="name">${r.name}</span><span class="desc">${r.description}</span></div>`;
+      item.innerHTML = '<span class="avatar">' + r.avatar + '</span><div class="meta"><span class="name">' + r.name + '</span><span class="desc">' + r.description + '</span></div>';
       item.onclick = () => { this.setCurrent(r.id); menu.classList.add('hidden'); };
       menu.appendChild(item);
     });
@@ -990,7 +1210,7 @@ class RoleManager {
     this.roles.forEach(r => {
       const item = document.createElement('div');
       item.className = 'role-list-item' + (r.id === this.currentRoleId ? ' active' : '');
-      item.innerHTML = `<span style="font-size:1.2rem;">${r.avatar}</span><div style="flex:1;"><div style="font-weight:600;">${r.name}</div><div style="font-size:.75rem;color:#a0a0a0;">${r.description}</div></div>`;
+      item.innerHTML = '<span style="font-size:1.2rem;">' + r.avatar + '</span><div style="flex:1;"><div style="font-weight:600;">' + r.name + '</div><div style="font-size:.75rem;color:#a0a0a0;">' + r.description + '</div></div>';
       item.onclick = () => this.startEdit(r.id);
       list.appendChild(item);
     });
