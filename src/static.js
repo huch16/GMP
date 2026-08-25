@@ -74,7 +74,6 @@ const indexHTML = `<!DOCTYPE html>
             <label>Model: <select id="modelSelect">
                 <optgroup label="Gemini" data-provider="gemini">
                 <option value="models/gemini-2.5-flash-native-audio-preview-12-2025">Gemini 2.5 Flash (Native Audio Preview)</option>
-                <option value="models/gemini-3.1-flash-live-preview">Gemini 3.1 Flash (Live Preview)</option>
                 <option value="models/gemini-2.5-flash-native-audio-preview-09-2025">Gemini 2.5 Flash (Native Audio Preview Sep)</option>
                 </optgroup>
                 <optgroup label="MiniMax" data-provider="minimax">
