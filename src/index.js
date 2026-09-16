@@ -71,7 +71,7 @@ async function handleSummarize(request, env) {
   const prompt = `请将以下对话压缩为一段不超过 150 字的中文摘要，保留关键事实、意图、结论，供后续会话继续使用：\n${transcript}`;
 
   try {
-    const result = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+    const result = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fp8', {
       prompt,
       max_tokens: 200,
       temperature: 0.4,
