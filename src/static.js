@@ -46,6 +46,7 @@ const indexHTML = `<!DOCTYPE html>
         <nav class="bottom-nav">
             <button id="micBtn" class="nav-btn" title="麦克风">
                 <span class="icon">🎤</span>
+                <span id="micStatus" class="mic-status">关</span>
             </button>
             <button id="cameraBtn" class="nav-btn" title="摄像头">
                 <span class="icon">📷</span>
@@ -89,6 +90,7 @@ const indexHTML = `<!DOCTYPE html>
             <label>System Instructions: <textarea id="systemInput" rows="3">You are a helpful assistant.</textarea></label>
             <label>Access Token (optional): <input type="password" id="accessTokenInput" placeholder="Leave empty if not required"></label>
             <p class="hint">API keys are stored as Worker secrets. Set <code>GOOGLE_API_KEY</code>, <code>MINIMAX_API_KEY</code> and <code>ZHIPU_API_KEY</code> via <code>wrangler secret put</code>.</p>
+            <button id="clearMemoryBtn" class="btn-secondary" style="margin-right:8px;">清除对话记忆</button>
             <button id="saveSettings" class="btn-primary">Save</button>
             <button id="closeSettings" class="btn-secondary">Close</button>
         </div>
@@ -314,6 +316,17 @@ body {
 .nav-btn:hover { color: var(--accent); }
 .nav-btn.active { color: var(--accent); }
 
+/* Mic status text */
+.mic-status {
+    font-size: 0.7rem;
+    margin-left: 4px;
+    color: var(--text-secondary);
+}
+.nav-btn.active .mic-status {
+    color: var(--accent);
+    font-weight: bold;
+}
+
 .modal {
     position: fixed;
     top: 0; left: 0;
@@ -394,7 +407,39 @@ body {
 `};
 
 const jsFiles = {
-  'js/script.js': `class RealtimeAgent {
+  'js/script.js': `/* ---------- 记忆功能 ---------- */
+function loadMemory() {
+  try { return JSON.parse(localStorage.getItem('gmp_memory') || '[]'); } catch(e) { return []; }
+}
+function saveMemory(role, content) {
+  const mem = loadMemory();
+  mem.push({ role, content, ts: Date.now() });
+  // 只保留最近 20 条
+  while (mem.length > 20) mem.shift();
+  localStorage.setItem('gmp_memory', JSON.stringify(mem));
+  updateSystemInstructionsWithMemory();
+}
+function clearMemory() {
+  localStorage.removeItem('gmp_memory');
+  // 重置系统指令为默认值
+  const base = localStorage.getItem('systemInstructions') || '你是一个乐于助人的助手。';
+  localStorage.setItem('systemInstructions', base);
+  const sysInput = document.getElementById('systemInput');
+  if (sysInput) sysInput.value = base;
+  this?.addMessage?.('system', '已清除对话记忆');
+}
+function updateSystemInstructionsWithMemory() {
+  const mem = loadMemory();
+  if (mem.length === 0) return;
+  const summary = mem.map(m => `${m.role === 'user' ? '用户' : '助手'}: ${m.content}`).join('\\n');
+  const base = localStorage.getItem('systemInstructions') || '你是一个乐于助人的助手。';
+  const combined = base + '\\n\\n[历史对话记忆]\\n' + summary;
+  localStorage.setItem('systemInstructions', combined);
+  const sysInput = document.getElementById('systemInput');
+  if (sysInput) sysInput.value = combined;
+}
+
+class RealtimeAgent {
   constructor() {
     this.ws = null;
     this.token = localStorage.getItem('accessToken') || '';
@@ -980,6 +1025,7 @@ class ChatUI {
     document.getElementById('providerSelect').onchange = () => this.onProviderChange();
     document.getElementById('saveSettings').onclick = () => this.saveSettings();
     document.getElementById('tempInput').oninput = (e) => document.getElementById('tempValue').textContent = e.target.value;
+    document.getElementById('clearMemoryBtn').onclick = () => { clearMemory(); this.addMessage('system', '已清除对话记忆'); };
 
     const provider = localStorage.getItem('provider') || 'gemini';
     document.getElementById('providerSelect').value = provider;
@@ -994,12 +1040,12 @@ class ChatUI {
     document.getElementById('voiceInput').value = localStorage.getItem('voice') || voiceDefaults[provider];
     document.getElementById('tempInput').value = localStorage.getItem('temperature') || '0.8';
     document.getElementById('tempValue').textContent = localStorage.getItem('temperature') || '0.8';
-    document.getElementById('systemInput').value = localStorage.getItem('systemInstructions') || 'You are a helpful assistant.';
+    document.getElementById('systemInput').value = localStorage.getItem('systemInstructions') || '你是一个乐于助人的助手。';
     document.getElementById('accessTokenInput').value = localStorage.getItem('accessToken') || '';
 
     this.agent.onConnect = () => { document.getElementById('connectBtn').style.display = 'none'; document.getElementById('disconnectBtn').style.display = 'block'; };
     this.agent.onDisconnect = () => { document.getElementById('connectBtn').style.display = 'block'; document.getElementById('disconnectBtn').style.display = 'none'; };
-    this.agent.onText = (text) => this.addMessage('assistant', text);
+    this.agent.onText = (text) => { this.addMessage('assistant', text); saveMemory('assistant', text); };
     this.agent.onTurnComplete = () => {};
     this.agent.onUserTranscript = (text) => this.addMessage('user', text);
     this.agent.onAudio = (buffer, sampleRate) => this.playPcm(buffer, sampleRate);
@@ -1035,7 +1081,7 @@ class ChatUI {
   bindAgentCallbacks() {
     this.agent.onConnect = () => { document.getElementById('connectBtn').style.display = 'none'; document.getElementById('disconnectBtn').style.display = 'block'; };
     this.agent.onDisconnect = () => { document.getElementById('connectBtn').style.display = 'block'; document.getElementById('disconnectBtn').style.display = 'none'; };
-    this.agent.onText = (text) => this.addMessage('assistant', text);
+    this.agent.onText = (text) => { this.addMessage('assistant', text); saveMemory('assistant', text); };
     this.agent.onTurnComplete = () => {};
     this.agent.onUserTranscript = (text) => this.addMessage('user', text);
     this.agent.onAudio = (buffer, sampleRate) => this.playPcm(buffer, sampleRate);
@@ -1279,5 +1325,7 @@ window.addEventListener('DOMContentLoaded', () => {
   if (sysInput) sysInput.value = role.systemPrompt;
 });
 
+// 初始化时同步历史记忆到系统指令
+updateSystemInstructionsWithMemory();
 const ui = new ChatUI();`};
 export { indexHTML, cssFiles, jsFiles };
