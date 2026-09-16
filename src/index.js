@@ -22,6 +22,10 @@ export default {
       return handleAPIRequest(request, env);
     }
 
+    if (url.pathname === '/api/ai/summarize' && request.method === 'POST') {
+      return handleSummarize(request, env);
+    }
+
     if (url.pathname === '/' || url.pathname === '/index.html') {
       return new Response(indexHTML, {
         headers: { 'content-type': 'text/html;charset=UTF-8' },
@@ -40,6 +44,49 @@ export default {
     return new Response('Not Found', { status: 404 });
   },
 };
+
+/**
+ * POST /api/ai/summarize
+ * Body: { messages: [{role:'user'|'assistant', content:string}, …] }
+ * Returns: { summary: string } – AI‑generated compact recap (Chinese).
+ * Requires the Cloudflare Workers AI binding (`AI`). If the binding is missing
+ * a 503 is returned and the client should keep the raw memory locally.
+ */
+async function handleSummarize(request, env) {
+  if (!checkAuth(request, env)) return new Response('Unauthorized', { status: 401 });
+  if (!env.AI) return new Response('AI binding missing', { status: 503 });
+
+  let body;
+  try { body = await request.json(); } catch { return new Response('Invalid JSON', { status: 400 }); }
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
+  if (messages.length === 0) return new Response(JSON.stringify({ summary: '' }), {
+    headers: { 'content-type': 'application/json' },
+  });
+
+  // Build a compact prompt (max ~30 messages, 6000 chars total)
+  const slice = messages.slice(-30);
+  const transcript = slice
+    .map(m => (m.role === 'user' ? '用户' : '助手') + ': ' + String(m.content || '').slice(0, 400))
+    .join('\n');
+  const prompt = `请将以下对话压缩为一段不超过 150 字的中文摘要，保留关键事实、意图、结论，供后续会话继续使用：\n${transcript}`;
+
+  try {
+    const result = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+      prompt,
+      max_tokens: 200,
+      temperature: 0.4,
+    });
+    const summary = (typeof result === 'string' ? result : (result?.response || result?.text || '')).trim();
+    return new Response(JSON.stringify({ summary }), {
+      headers: { 'content-type': 'application/json' },
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message || 'AI error' }), {
+      status: 500,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+}
 
 function checkAuth(request, env) {
   if (!env.ACCESS_TOKEN) return true;

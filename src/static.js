@@ -90,6 +90,7 @@ const indexHTML = `<!DOCTYPE html>
             <label>System Instructions: <textarea id="systemInput" rows="3">You are a helpful assistant.</textarea></label>
             <label>Access Token (optional): <input type="password" id="accessTokenInput" placeholder="Leave empty if not required"></label>
             <p class="hint">API keys are stored as Worker secrets. Set <code>GOOGLE_API_KEY</code>, <code>MINIMAX_API_KEY</code> and <code>ZHIPU_API_KEY</code> via <code>wrangler secret put</code>.</p>
+            <button id="summarizeBtn" class="btn-secondary" style="margin-right:8px;">生成 AI 小结</button>
             <button id="clearMemoryBtn" class="btn-secondary" style="margin-right:8px;">清除对话记忆</button>
             <button id="saveSettings" class="btn-primary">Save</button>
             <button id="closeSettings" class="btn-secondary">Close</button>
@@ -407,36 +408,80 @@ body {
 `};
 
 const jsFiles = {
-  'js/script.js': `/* ---------- 记忆功能 ---------- */
+  'js/script.js': `/* ---------- 记忆功能（AI 小结） ---------- */
 function loadMemory() {
   try { return JSON.parse(localStorage.getItem('gmp_memory') || '[]'); } catch(e) { return []; }
+}
+function loadSummary() {
+  try { return JSON.parse(localStorage.getItem('gmp_memory_summary') || 'null'); } catch(e) { return null; }
 }
 function saveMemory(role, content) {
   const mem = loadMemory();
   mem.push({ role, content, ts: Date.now() });
-  // 只保留最近 20 条
   while (mem.length > 20) mem.shift();
   localStorage.setItem('gmp_memory', JSON.stringify(mem));
+  // 当未压缩的原始记忆超过 10 条时自动请求 AI 小结
+  if (mem.length > 10 && !window.__summarizing) summarizeMemory(true);
   updateSystemInstructionsWithMemory();
 }
 function clearMemory() {
   localStorage.removeItem('gmp_memory');
-  // 重置系统指令为默认值
+  localStorage.removeItem('gmp_memory_summary');
   const base = localStorage.getItem('systemInstructions') || '你是一个乐于助人的助手。';
   localStorage.setItem('systemInstructions', base);
   const sysInput = document.getElementById('systemInput');
   if (sysInput) sysInput.value = base;
-  this?.addMessage?.('system', '已清除对话记忆');
 }
 function updateSystemInstructionsWithMemory() {
   const mem = loadMemory();
-  if (mem.length === 0) return;
-  const summary = mem.map(m => `${m.role === 'user' ? '用户' : '助手'}: ${m.content}`).join('\\n');
+  const summary = loadSummary();
+  if (!summary && mem.length === 0) return;
   const base = localStorage.getItem('systemInstructions') || '你是一个乐于助人的助手。';
-  const combined = base + '\\n\\n[历史对话记忆]\\n' + summary;
+  const parts = [base];
+  if (summary && summary.text) {
+    parts.push('【对话小结】');
+    parts.push(summary.text);
+  }
+  if (mem.length > 0) {
+    parts.push('【最近对话】');
+    const tail = mem.slice(-6);
+    parts.push(tail.map(m => (m.role === 'user' ? '用户' : '助手') + ': ' + m.content).join('\\n'));
+  }
+  const combined = parts.join('\\n');
   localStorage.setItem('systemInstructions', combined);
   const sysInput = document.getElementById('systemInput');
   if (sysInput) sysInput.value = combined;
+}
+async function summarizeMemory(auto = false) {
+  if (window.__summarizing) return;
+  const mem = loadMemory();
+  if (mem.length === 0) return;
+  window.__summarizing = true;
+  try {
+    const resp = await fetch('/api/ai/summarize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: mem }),
+    });
+    if (!resp.ok) throw new Error('Summarize API ' + resp.status);
+    const data = await resp.json();
+    if (data.summary) {
+      localStorage.setItem('gmp_memory_summary', JSON.stringify({
+        text: data.summary,
+        updatedAt: Date.now(),
+        fromCount: mem.length,
+      }));
+      // 压缩后可以保留最近 5 条以防失真
+      const tail = mem.slice(-5);
+      localStorage.setItem('gmp_memory', JSON.stringify(tail));
+      updateSystemInstructionsWithMemory();
+      if (!auto) ui && ui.addMessage('system', '已生成 AI 小结');
+    }
+  } catch (e) {
+    if (!auto) ui && ui.addMessage('system', '小结生成失败：' + e.message);
+  } finally {
+    window.__summarizing = false;
+  }
 }
 
 class RealtimeAgent {
@@ -1026,6 +1071,7 @@ class ChatUI {
     document.getElementById('saveSettings').onclick = () => this.saveSettings();
     document.getElementById('tempInput').oninput = (e) => document.getElementById('tempValue').textContent = e.target.value;
     document.getElementById('clearMemoryBtn').onclick = () => { clearMemory(); this.addMessage('system', '已清除对话记忆'); };
+    document.getElementById('summarizeBtn').onclick = () => summarizeMemory(false);
 
     const provider = localStorage.getItem('provider') || 'gemini';
     document.getElementById('providerSelect').value = provider;
@@ -1096,11 +1142,25 @@ class ChatUI {
 
   addMessage(role, content) {
     const chat = document.getElementById('chatHistory');
-    const div = document.createElement('div');
-    div.className = 'message ' + role + '-message';
-    div.textContent = content;
-    chat.appendChild(div);
-    chat.scrollTop = chat.scrollHeight;
+    // 批量渲染：同一帧内的多条消息合并到一次 DOM 操作
+    if (!this._pendingBatch) {
+      this._pendingBatch = [];
+      requestAnimationFrame(() => {
+        const frag = document.createDocumentFragment();
+        for (const { role: r, content: c } of this._pendingBatch) {
+          const d = document.createElement('div');
+          d.className = 'message ' + r + '-message';
+          d.textContent = c;
+          frag.appendChild(d);
+        }
+        chat.appendChild(frag);
+        // 只保留最近 100 条，防止 DOM 过大导致掉帧
+        while (chat.childElementCount > 100) chat.removeChild(chat.firstChild);
+        chat.scrollTop = chat.scrollHeight;
+        this._pendingBatch = null;
+      });
+    }
+    this._pendingBatch.push({ role, content });
   }
 
   setupAudioPipeline() {
