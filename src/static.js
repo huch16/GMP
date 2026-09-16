@@ -522,6 +522,7 @@ class RealtimeAgent {
   connect() {
     const wsUrl = 'wss://' + location.host + this.wsPath();
     this.ws = new WebSocket(wsUrl);
+    this.ws.binaryType = 'arraybuffer';
     this.ws.onopen = () => { this.isConnected = true; this.sendSetup(); };
     this.ws.onmessage = async (e) => {
       let data = e.data;
@@ -551,7 +552,14 @@ class RealtimeAgent {
     if (this.playPendingTimer) { clearTimeout(this.playPendingTimer); this.playPendingTimer = null; }
   }
 
-  send(data) { if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(data)); }
+  send(data) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    if (data instanceof ArrayBuffer) {
+      this.ws.send(data);
+    } else {
+      this.ws.send(JSON.stringify(data));
+    }
+  }
 
   floatTo16BitPCM(input) {
     const buffer = new ArrayBuffer(input.length * 2);
@@ -600,28 +608,87 @@ class RealtimeAgent {
   async startRecording() {
     try {
       this.recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      // 使用 AudioWorklet（低延迟、离主线程），并在 worklet 中完成重采样+Int16 转换。
+      const workletCode = `
+        class PCMProcessor extends AudioWorkletProcessor {
+          constructor() {
+            super();
+            this._buffer = [];
+            this._needed = 1024; // 目标块大小 (16‑bit 采样数)
+            this._sourceRate = sampleRate;
+            this._targetRate = ${this.sampleRate};
+            this._ratio = this._sourceRate / this._targetRate;
+            this._carry = 0;
+          }
+          process(inputs) {
+            const input = inputs[0][0];
+            if (!input) return true;
+            // 简易降采样：每隔 _ratio 取一个样本
+            for (let i = 0; i < input.length; i++) {
+              this._carry += this._ratio;
+              while (this._carry >= 1) {
+                this._buffer.push(input[i] || 0);
+                this._carry -= 1;
+                if (this._buffer.length >= this._needed) {
+                  this._flush();
+                }
+              }
+            }
+            return true;
+          }
+          _flush() {
+            const len = this._buffer.length;
+            const buf = new ArrayBuffer(len * 2);
+            const view = new DataView(buf);
+            for (let i = 0; i < len; i++) {
+              let s = Math.max(-1, Math.min(1, this._buffer[i]));
+              view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+            }
+            this.port.postMessage(new Uint8Array(buf), [buf]);
+            this._buffer = [];
+          }
+        }
+        registerProcessor('pcm-processor', PCMProcessor);
+      `;
+      const blob = new Blob([workletCode], { type: 'application/javascript' });
+      const workletUrl = URL.createObjectURL(blob);
+
       try {
         this.audioContext = new AudioContext({ sampleRate: this.sampleRate, latencyHint: 'interactive' });
       } catch (e) {
         this.audioContext = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
       }
       try { if (this.audioContext.state === 'suspended') this.audioContext.resume(); } catch (e) {}
+
+      await this.audioContext.audioWorklet.addModule(workletUrl);
       const source = this.audioContext.createMediaStreamSource(this.recordingStream);
       this.analyser = this.audioContext.createAnalyser();
       source.connect(this.analyser);
-      this.scriptProcessor = this.audioContext.createScriptProcessor(2048, 1, 1);
-      this.scriptProcessor.onaudioprocess = (e) => {
+
+      this.audioWorkletNode = new AudioWorkletNode(this.audioContext, 'pcm-processor');
+      this.audioWorkletNode.port.onmessage = (e) => {
         if (!this.isRecording) return;
-        const inputData = e.inputBuffer.getChannelData(0);
-        const pcm = this.floatTo16BitPCM(inputData);
-        this.trackVoiceActivity(inputData);
+        const pcm = e.data; // Uint8Array (Int16 LE)
+        // VAD 需要原始 Float32；这里简化：使用 analyser 的 RMS
+        const rms = this._lastRms || 0;
+        this._handleVad(rms);
         this.sendAudio(pcm);
       };
-      source.connect(this.scriptProcessor);
-      this.micGain = this.audioContext.createGain();
-      this.micGain.gain.value = 0;
-      this.scriptProcessor.connect(this.micGain);
-      this.micGain.connect(this.audioContext.destination);
+      // 通过 AnalyserNode 实时获取 RMS 用于 VAD
+      const buf = new Float32Array(this.analyser.fftSize);
+      const tickVad = () => {
+        if (!this.isRecording) return;
+        this.analyser.getFloatTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+        this._lastRms = Math.sqrt(sum / buf.length);
+        requestAnimationFrame(tickVad);
+      };
+      tickVad();
+
+      source.connect(this.audioWorkletNode);
+      this.audioWorkletNode.connect(this.audioContext.destination);
+
       this.vadLastVoice = null;
       this.vadPending = false;
       this.activityOpen = false;
@@ -638,14 +705,35 @@ class RealtimeAgent {
     }
   }
 
+  _handleVad(rms) {
+    const now = performance.now();
+    const voiceActive = rms > 0.008;
+    if (this.modelSpeaking) {
+      if (voiceActive) this.vadLastVoice = now;
+      return;
+    }
+    if (voiceActive) {
+      this.vadLastVoice = now;
+      if (!this.activityOpen) {
+        this.activityOpen = true;
+        this.send({ realtimeInput: { activityStart: {} } });
+      }
+      return;
+    }
+    if (this.activityOpen && this.vadLastVoice && now - this.vadLastVoice > 700) {
+      this.activityOpen = false;
+      this.vadLastVoice = null;
+      this.send({ realtimeInput: { activityEnd: {} } });
+    }
+  }
+
   stopRecording() {
     this.isRecording = false;
     if (this.activityOpen) {
       this.activityOpen = false;
       this.send({ realtimeInput: { activityEnd: {} } });
     }
-    if (this.scriptProcessor) { this.scriptProcessor.disconnect(); this.scriptProcessor = null; }
-    if (this.micGain) { this.micGain.disconnect(); this.micGain = null; }
+    if (this.audioWorkletNode) { this.audioWorkletNode.disconnect(); this.audioWorkletNode = null; }
     if (this.recordingStream) { this.recordingStream.getTracks().forEach(t => t.stop()); this.recordingStream = null; }
     if (this.audioContext) { this.audioContext.close(); this.audioContext = null; }
   }
@@ -783,9 +871,24 @@ class GeminiAgent extends RealtimeAgent {
     this.send({ clientContent: { turns: [{ role: 'user', parts: [{ text }] }], turnComplete: true } });
   }
 
-  sendAudio(pcmData) {
+  async sendAudio(pcmData) {
     const base64 = this.toBase64(pcmData);
-    this.send({ realtimeInput: { mediaChunks: [{ mimeType: 'audio/pcm;rate=16000', data: base64 }] } });
+    const payload = JSON.stringify({
+      realtimeInput: { mediaChunks: [{ mimeType: 'audio/pcm;rate=' + this.sampleRate, data: base64 }] },
+    });
+    try {
+      // 使用浏览器原生 CompressionStream (gzip) 压缩，再以二进制发送
+      const compressed = await new Response(new Blob([payload]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
+      // 第一个字节为 0x01 标记为压缩音频，后接 gzip 数据
+      const marker = new Uint8Array([0x01]);
+      const merged = new Uint8Array(1 + compressed.byteLength);
+      merged.set(marker, 0);
+      merged.set(new Uint8Array(compressed), 1);
+      this.ws && this.ws.readyState === WebSocket.OPEN && this.ws.send(merged.buffer);
+    } catch (e) {
+      // 压缩失败则回退到原始 JSON
+      this.send({ realtimeInput: { mediaChunks: [{ mimeType: 'audio/pcm;rate=' + this.sampleRate, data: base64 }] } });
+    }
   }
 
   sendImage(imageData) {

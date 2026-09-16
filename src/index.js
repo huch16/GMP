@@ -116,10 +116,22 @@ function relay(proxy, upstream) {
     pendingMessages = [];
   });
   proxy.addEventListener('message', (event) => {
+    // 解压前端发送的压缩音频帧：第一个字节 0x01 表示后跟 gzip 数据
+    const data = event.data;
+    if (data instanceof ArrayBuffer && data.byteLength > 1 && new Uint8Array(data)[0] === 0x01) {
+      try {
+        const stream = new Response(new Blob([data.slice(1)]).stream().pipeThrough(new DecompressionStream('gzip')));
+        stream.text().then((text) => {
+          if (upstream.readyState === WebSocket.OPEN) upstream.send(text);
+          else pendingMessages.push(text);
+        }).catch(() => {});
+      } catch (e) { /* fallthrough */ }
+      return;
+    }
     if (upstream.readyState === WebSocket.OPEN) {
-      upstream.send(event.data);
+      upstream.send(data);
     } else {
-      pendingMessages.push(event.data);
+      pendingMessages.push(data);
     }
   });
   upstream.addEventListener('message', (event) => {
