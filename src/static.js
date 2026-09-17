@@ -80,8 +80,9 @@ const indexHTML = `<!DOCTYPE html>
             </select></label>
             <label>Model: <select id="modelSelect">
                 <optgroup label="Gemini" data-provider="gemini">
+                <option value="models/gemini-3.8-live">Gemini 3.8 Live (默认)</option>
+                <option value="models/gemini-3.1-flash-live-preview">Gemini 3.1 Flash Live (Preview)</option>
                 <option value="models/gemini-2.5-flash-native-audio-preview-12-2025">Gemini 2.5 Flash (Native Audio Preview)</option>
-                <option value="models/gemini-2.5-flash-native-audio-preview-09-2025">Gemini 2.5 Flash (Native Audio Preview Sep)</option>
                 </optgroup>
                 <optgroup label="MiniMax" data-provider="minimax">
                     <option value="abab6.5s-chat">MiniMax Realtime (abab6.5s-chat)</option>
@@ -988,7 +989,7 @@ class GeminiAgent extends RealtimeAgent {
 
   getConfig() {
     return {
-      model: localStorage.getItem('model') || 'models/gemini-2.5-flash-native-audio-preview-12-2025',
+      model: localStorage.getItem('model') || 'models/gemini-3.8-live',
       generationConfig: {
         temperature: this.getTemperature(),
         top_p: 0.95,
@@ -1361,7 +1362,7 @@ class ChatUI {
     const modelDefaults = {
       minimax: 'abab6.5s-chat',
       glm: 'glm-realtime-flash',
-      gemini: 'models/gemini-2.5-flash-native-audio-preview-12-2025',
+      gemini: 'models/gemini-3.8-live',
     };
     const voiceDefaults = { minimax: 'female-yujie', glm: 'tongtong', gemini: 'Aoede' };
     document.getElementById('modelSelect').value = localStorage.getItem('model') || modelDefaults[provider];
