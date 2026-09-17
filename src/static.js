@@ -468,9 +468,9 @@ function updateSystemInstructionsWithMemory() {
   if (mem.length > 0) {
     parts.push('【最近对话】');
     const tail = mem.slice(-6);
-    parts.push(tail.map(m => (m.role === 'user' ? '用户' : '助手') + ': ' + m.content).join('\\n'));
+    parts.push(tail.map(m => (m.role === 'user' ? '用户' : '助手') + ': ' + m.content).join(String.fromCharCode(10)));
   }
-  const combined = parts.join('\\n');
+  const combined = parts.join(String.fromCharCode(10));
   localStorage.setItem('systemInstructions', combined);
   const sysInput = document.getElementById('systemInput');
   if (sysInput) sysInput.value = combined;
@@ -669,7 +669,7 @@ class RealtimeAgent {
         '  }',
         '}',
         "registerProcessor('pcm-processor', PCMProcessor);"
-      ].join('\n');
+      ].join(String.fromCharCode(10));
       const blob = new Blob([workletCode], { type: 'application/javascript' });
       const workletUrl = URL.createObjectURL(blob);
 
