@@ -7,10 +7,16 @@ const indexHTML = `<!DOCTYPE html>
     <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
+    <!-- Toast 通知容器 -->
+    <div id="toastContainer" class="toast-container" aria-live="polite"></div>
+
     <div class="app-container">
         <!-- Top bar -->
         <header class="app-header">
             <h1 class="app-title">GMP Playground</h1>
+            <button id="themeToggleBtn" class="theme-toggle" title="切换主题" aria-label="切换主题">
+                <i class="fa-solid fa-circle-half-stroke"></i>
+            </button>
             <div class="role-selector">
                 <button id="roleBtn" class="role-btn">
                     <span id="roleAvatar">🤖</span>
@@ -428,10 +434,122 @@ body {
     .camera-preview, .screen-preview { width: 120px; height: 80px; bottom: 110px; left: 8px; }
     .nav-btn { font-size: 1.2rem; }
 }
+
+/* ===== Toast 通知 ===== */
+.toast-container {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 2000;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+    max-width: calc(100vw - 32px);
+}
+.toast {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    padding: 10px 16px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    pointer-events: auto;
+    font-size: 0.9rem;
+    line-height: 1.4;
+    animation: toastSlide 0.25s ease;
+    border-left: 4px solid var(--accent);
+    word-break: break-word;
+}
+.toast.error   { border-left-color: #ef4444; }
+.toast.success { border-left-color: #4ade80; }
+.toast.info    { border-left-color: #0ea5e9; }
+.toast.fadeout { opacity: 0; transform: translateX(120%); transition: all 0.3s ease; }
+@keyframes toastSlide {
+    from { transform: translateX(120%); opacity: 0; }
+    to   { transform: translateX(0); opacity: 1; }
+}
+
+/* ===== Theme toggle & 亮色主题 ===== */
+.theme-toggle {
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 1.1rem;
+    padding: 4px 8px;
+    border-radius: 6px;
+    margin-right: 4px;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+.theme-toggle:hover { background: var(--bg-tertiary); }
+html.light {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f3f4f6;
+    --bg-tertiary: #e5e7eb;
+    --text-primary: #111827;
+    --text-secondary: #6b7280;
+    --border: #d1d5db;
+}
+html.light body { background: #ffffff; color: #111827; }
+
+/* ===== 消息增强：时间戳 + 复制按钮 ===== */
+.message {
+    position: relative;
+    padding: 8px 32px 22px 12px;
+}
+.message .timestamp {
+    position: absolute;
+    bottom: 4px;
+    right: 8px;
+    font-size: 0.65rem;
+    opacity: 0.55;
+}
+.message .copy-btn {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    background: none;
+    border: none;
+    color: inherit;
+    opacity: 0;
+    cursor: pointer;
+    font-size: 0.75rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: opacity .2s;
+}
+.message:hover .copy-btn { opacity: 0.7; }
+.message .copy-btn:hover { opacity: 1; background: rgba(127,127,127,0.15); }
+.message.system .copy-btn,
+.message.system .timestamp { display: none; }
 `};
 
 const jsFiles = {
-  'js/script.js': `/* ---------- 记忆功能（AI 小结） ---------- */
+  'js/script.js': `/* ---------- Toast 通知 ---------- */
+function showToast(msg, type = 'info', duration = 3000) {
+  const container = document.getElementById('toastContainer');
+  if (!container) return;
+  const t = document.createElement('div');
+  t.className = 'toast ' + type;
+  t.textContent = msg;
+  container.appendChild(t);
+  setTimeout(() => {
+    t.classList.add('fadeout');
+    setTimeout(() => t.remove(), 300);
+  }, duration);
+}
+
+/* ---------- 主题切换 ---------- */
+function applyTheme(theme) {
+  const html = document.documentElement;
+  html.classList.toggle('light', theme === 'light');
+  html.classList.toggle('dark', theme !== 'light');
+  localStorage.setItem('theme', theme);
+}
+applyTheme(localStorage.getItem('theme') || 'dark');
+
+/* ---------- 记忆功能（AI 小结） ---------- */
 function loadMemory() {
   try { return JSON.parse(localStorage.getItem('gmp_memory') || '[]'); } catch(e) { return []; }
 }
@@ -1149,7 +1267,21 @@ class ChatUI {
   }
 
   setupEventListeners() {
-    document.getElementById('connectBtn').onclick = () => this.agent.connect();
+    document.getElementById('connectBtn').onclick = async () => {
+      const btn = document.getElementById('connectBtn');
+      const orig = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 连接中';
+      try {
+        await this.agent.connect();
+        showToast('已连接', 'success', 1500);
+      } catch (e) {
+        showToast('连接失败：' + (e.message || e), 'error', 4000);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = orig;
+      }
+    };
     document.getElementById('disconnectBtn').onclick = () => this.agent.disconnect();
     document.getElementById('micBtn').onclick = async () => {
       const btn = document.getElementById('micBtn');
@@ -1197,14 +1329,31 @@ class ChatUI {
       if (this.agent.isScreenActive) { btn.classList.remove('active'); this.agent.stopScreen(); } else { btn.classList.add('active'); this.agent.startScreen(); }
     };
     document.getElementById('sendBtn').onclick = () => this.sendMessage();
-    document.getElementById('messageInput').onkeypress = (e) => { if (e.key === 'Enter') this.sendMessage(); };
+    document.getElementById('messageInput').onkeydown = (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        this.sendMessage();
+      }
+    };
     document.getElementById('settingsBtn').onclick = () => document.getElementById('settingsModal').classList.add('active');
     document.getElementById('closeSettings').onclick = () => document.getElementById('settingsModal').classList.remove('active');
     document.getElementById('providerSelect').onchange = () => this.onProviderChange();
     document.getElementById('saveSettings').onclick = () => this.saveSettings();
     document.getElementById('tempInput').oninput = (e) => document.getElementById('tempValue').textContent = e.target.value;
-    document.getElementById('clearMemoryBtn').onclick = () => { clearMemory(); this.addMessage('system', '已清除对话记忆'); };
-    document.getElementById('summarizeBtn').onclick = () => summarizeMemory(false);
+    document.getElementById('clearMemoryBtn').onclick = () => { clearMemory(); showToast('已清除对话记忆', 'success'); };
+    document.getElementById('summarizeBtn').onclick = async () => {
+      const btn = document.getElementById('summarizeBtn');
+      const orig = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 生成中';
+      await summarizeMemory(false);
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    };
+    document.getElementById('themeToggleBtn').onclick = () => {
+      const cur = localStorage.getItem('theme') || 'dark';
+      applyTheme(cur === 'dark' ? 'light' : 'dark');
+    };
 
     const provider = localStorage.getItem('provider') || 'gemini';
     document.getElementById('providerSelect').value = provider;
@@ -1275,7 +1424,6 @@ class ChatUI {
 
   addMessage(role, content) {
     const chat = document.getElementById('chatHistory');
-    // 批量渲染：同一帧内的多条消息合并到一次 DOM 操作
     if (!this._pendingBatch) {
       this._pendingBatch = [];
       requestAnimationFrame(() => {
@@ -1283,11 +1431,30 @@ class ChatUI {
         for (const { role: r, content: c } of this._pendingBatch) {
           const d = document.createElement('div');
           d.className = 'message ' + r + '-message';
-          d.textContent = c;
+          const text = document.createElement('div');
+          text.className = 'message-text';
+          text.textContent = c;
+          d.appendChild(text);
+          // 时间戳
+          const ts = document.createElement('span');
+          ts.className = 'timestamp';
+          ts.textContent = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+          d.appendChild(ts);
+          // 复制按钮（非系统消息）
+          if (r !== 'system') {
+            const btn = document.createElement('button');
+            btn.className = 'copy-btn';
+            btn.innerHTML = '<i class="fa-solid fa-copy"></i>';
+            btn.title = '复制';
+            btn.onclick = (e) => {
+              e.stopPropagation();
+              navigator.clipboard.writeText(c).then(() => showToast('已复制', 'success', 1500));
+            };
+            d.appendChild(btn);
+          }
           frag.appendChild(d);
         }
         chat.appendChild(frag);
-        // 只保留最近 100 条，防止 DOM 过大导致掉帧
         while (chat.childElementCount > 100) chat.removeChild(chat.firstChild);
         chat.scrollTop = chat.scrollHeight;
         this._pendingBatch = null;
