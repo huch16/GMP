@@ -247,6 +247,7 @@ body {
     right: 12px;
     width: 50px;
     height: 50px;
+    pointer-events: none;
 }
 .visualizer {
     width: 100%;
@@ -265,6 +266,7 @@ body {
     border: 2px solid var(--border);
     display: none;
     overflow: hidden;
+    pointer-events: none;
 }
 .camera-preview video, .screen-preview video { width: 100%; height: 100%; object-fit: cover; }
 
@@ -284,6 +286,8 @@ body {
     border-radius: 20px;
     color: var(--text-primary);
     font-size: 1rem;
+    min-height: 44px;
+    touch-action: manipulation;
 }
 .text-input:focus { outline: none; border-color: var(--accent); }
 .send-btn {
@@ -294,6 +298,10 @@ body {
     color: white;
     font-size: 1.2rem;
     cursor: pointer;
+    min-height: 44px;
+    min-width: 44px;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
 }
 .send-btn:hover { background: var(--accent-hover); }
 
@@ -304,6 +312,8 @@ body {
     background: var(--bg-secondary);
     border-top: 1px solid var(--border);
     flex-shrink: 0;
+    position: relative;
+    z-index: 10;
 }
 .nav-btn {
     flex: 1;
@@ -313,6 +323,10 @@ body {
     padding: 6px;
     border: none;
     cursor: pointer;
+    min-height: 48px;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
 }
 .nav-btn:hover { color: var(--accent); }
 .nav-btn.active { color: var(--accent); }
@@ -609,47 +623,44 @@ class RealtimeAgent {
     try {
       this.recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       // 使用 AudioWorklet（低延迟、离主线程），并在 worklet 中完成重采样+Int16 转换。
-      const workletCode = `
-        class PCMProcessor extends AudioWorkletProcessor {
-          constructor() {
-            super();
-            this._buffer = [];
-            this._needed = 1024; // 目标块大小 (16‑bit 采样数)
-            this._sourceRate = sampleRate;
-            this._targetRate = ${this.sampleRate};
-            this._ratio = this._sourceRate / this._targetRate;
-            this._carry = 0;
-          }
-          process(inputs) {
-            const input = inputs[0][0];
-            if (!input) return true;
-            // 简易降采样：每隔 _ratio 取一个样本
-            for (let i = 0; i < input.length; i++) {
-              this._carry += this._ratio;
-              while (this._carry >= 1) {
-                this._buffer.push(input[i] || 0);
-                this._carry -= 1;
-                if (this._buffer.length >= this._needed) {
-                  this._flush();
-                }
-              }
-            }
-            return true;
-          }
-          _flush() {
-            const len = this._buffer.length;
-            const buf = new ArrayBuffer(len * 2);
-            const view = new DataView(buf);
-            for (let i = 0; i < len; i++) {
-              let s = Math.max(-1, Math.min(1, this._buffer[i]));
-              view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
-            }
-            this.port.postMessage(new Uint8Array(buf), [buf]);
-            this._buffer = [];
-          }
-        }
-        registerProcessor('pcm-processor', PCMProcessor);
-      `;
+      const workletCode = [
+        'class PCMProcessor extends AudioWorkletProcessor {',
+        '  constructor() {',
+        '    super();',
+        '    this._buffer = [];',
+        '    this._needed = 1024;',
+        '    this._sourceRate = sampleRate;',
+        '    this._targetRate = ' + this.sampleRate + ';',
+        '    this._ratio = this._sourceRate / this._targetRate;',
+        '    this._carry = 0;',
+        '  }',
+        '  process(inputs) {',
+        '    const input = inputs[0][0];',
+        '    if (!input) return true;',
+        '    for (let i = 0; i < input.length; i++) {',
+        '      this._carry += this._ratio;',
+        '      while (this._carry >= 1) {',
+        '        this._buffer.push(input[i] || 0);',
+        '        this._carry -= 1;',
+        '        if (this._buffer.length >= this._needed) this._flush();',
+        '      }',
+        '    }',
+        '    return true;',
+        '  }',
+        '  _flush() {',
+        '    const len = this._buffer.length;',
+        '    const buf = new ArrayBuffer(len * 2);',
+        '    const view = new DataView(buf);',
+        '    for (let i = 0; i < len; i++) {',
+        '      let s = Math.max(-1, Math.min(1, this._buffer[i]));',
+        '      view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);',
+        '    }',
+        '    this.port.postMessage(new Uint8Array(buf), [buf]);',
+        '    this._buffer = [];',
+        '  }',
+        '}',
+        "registerProcessor('pcm-processor', PCMProcessor);"
+      ].join('\n');
       const blob = new Blob([workletCode], { type: 'application/javascript' });
       const workletUrl = URL.createObjectURL(blob);
 
