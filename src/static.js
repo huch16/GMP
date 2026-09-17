@@ -146,8 +146,10 @@ body {
     display: flex;
     flex-direction: column;
     height: 100vh;
+    height: 100dvh; /* 动态视口高度，避免软键盘遮挡底部导航 */
     max-width: 100%;
     margin: 0 auto;
+    padding-bottom: env(safe-area-inset-bottom);
 }
 .app-header {
     display: flex;
@@ -222,6 +224,7 @@ body {
     flex-direction: column;
     overflow: hidden;
     position: relative;
+    padding-bottom: 64px; /* 为固定底部导航预留空间 */
 }
 .chat-history {
     flex: 1;
@@ -309,11 +312,16 @@ body {
     display: flex;
     justify-content: space-around;
     padding: 8px 0;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom));
     background: var(--bg-secondary);
     border-top: 1px solid var(--border);
     flex-shrink: 0;
-    position: relative;
-    z-index: 10;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1000;
+    touch-action: manipulation;
 }
 .nav-btn {
     flex: 1;
@@ -327,6 +335,7 @@ body {
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
     user-select: none;
+    pointer-events: auto;
 }
 .nav-btn:hover { color: var(--accent); }
 .nav-btn.active { color: var(--accent); }
