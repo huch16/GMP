@@ -788,6 +788,14 @@ class RealtimeAgent {
   }
 
   async startScreen() {
+    // 能力检测：移动端多数浏览器不支持 getDisplayMedia
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      this.onError?.('当前浏览器不支持屏幕共享，请使用桌面版 Chrome / Edge / Firefox。');
+      const btn = document.getElementById('screenBtn');
+      if (btn) btn.classList.remove('active');
+      this.isScreenActive = false;
+      return;
+    }
     try {
       this.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
       const video = document.createElement('video');
@@ -806,7 +814,8 @@ class RealtimeAgent {
       console.error('Screen share error:', e);
       this.onError?.('屏幕共享启动失败：' + (e.name || e.message || '请重试'));
       this.isScreenActive = false;
-      document.getElementById('screenBtn').classList.remove('active');
+      const btn = document.getElementById('screenBtn');
+      if (btn) btn.classList.remove('active');
     }
   }
 
@@ -1172,6 +1181,7 @@ class ChatUI {
       flip.style.opacity = '1';
     };
     document.getElementById('screenBtn').onclick = () => {
+      console.log('[GMP] screenBtn clicked, provider=', this.agent.provider, 'connected=', this.agent.isConnected);
       if (this.agent.provider === 'minimax') { alert('MiniMax Realtime 暂不支持屏幕共享'); return; }
       if (!this.agent.isConnected) { this.addMessage('system', '请先点击 Connect 建立连接'); return; }
       const btn = document.getElementById('screenBtn');
