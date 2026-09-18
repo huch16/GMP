@@ -4,7 +4,7 @@ const indexHTML = `<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>GMP - Realtime Playground</title>
-    <link rel="stylesheet" href="/css/styles.css?v=8">
+    <link rel="stylesheet" href="/css/styles.css?v=9">
 </head>
 <body>
     <!-- Toast 通知容器 -->
@@ -125,7 +125,7 @@ const indexHTML = `<!DOCTYPE html>
         </div>
     </div>
 
-    <script src="/js/script.js?v=8"></script>
+    <script src="/js/script.js?v=9"></script>
 </body>
 </html>`;
 
@@ -845,33 +845,12 @@ class RealtimeAgent {
   }
 
   _handleVad(rms) {
-    const now = performance.now();
-    const voiceActive = rms > 0.008;
-    if (this.modelSpeaking) {
-      if (voiceActive) this.vadLastVoice = now;
-      return;
-    }
-    if (voiceActive) {
-      this.vadLastVoice = now;
-      if (!this.activityOpen) {
-        this.activityOpen = true;
-        this.send({ realtimeInput: { activityStart: {} } });
-      }
-      return;
-    }
-    if (this.activityOpen && this.vadLastVoice && now - this.vadLastVoice > 700) {
-      this.activityOpen = false;
-      this.vadLastVoice = null;
-      this.send({ realtimeInput: { activityEnd: {} } });
-    }
+    // 服务端自动 VAD 已启用，这里仅用于调试或手动指示
+    // 不再发送 activityStart/activityEnd
   }
 
   stopRecording() {
     this.isRecording = false;
-    if (this.activityOpen) {
-      this.activityOpen = false;
-      this.send({ realtimeInput: { activityEnd: {} } });
-    }
     if (this.audioWorkletNode) { this.audioWorkletNode.disconnect(); this.audioWorkletNode = null; }
     if (this.recordingStream) { this.recordingStream.getTracks().forEach(t => t.stop()); this.recordingStream = null; }
     if (this.audioContext) { this.audioContext.close(); this.audioContext = null; }
@@ -1015,7 +994,9 @@ class GeminiAgent extends RealtimeAgent {
       systemInstruction: { parts: [{ text: localStorage.getItem('systemInstructions') || 'You are a helpful assistant.' }] },
       realtimeInputConfig: {
         automaticActivityDetection: {
-          disabled: true,
+          disabled: false,
+          silenceThresholdMs: 1000,
+          prefixPaddingMs: 300,
         },
         turnCoverage: 'TURN_INCLUDES_ALL_INPUT',
       },
