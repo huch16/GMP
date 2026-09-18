@@ -4,7 +4,7 @@ const indexHTML = `<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>GMP - Realtime Playground</title>
-    <link rel="stylesheet" href="/css/styles.css?v=6">
+    <link rel="stylesheet" href="/css/styles.css?v=7">
 </head>
 <body>
     <!-- Toast 通知容器 -->
@@ -125,7 +125,7 @@ const indexHTML = `<!DOCTYPE html>
         </div>
     </div>
 
-    <script src="/js/script.js?v=6"></script>
+    <script src="/js/script.js?v=7"></script>
 </body>
 </html>`;
 
@@ -994,18 +994,23 @@ class GeminiAgent extends RealtimeAgent {
   }
 
   getConfig() {
+    const model = localStorage.getItem('model') || 'models/gemini-3.8-live';
+    const isNewLive = /gemini-3\./.test(model);
     return {
-      model: localStorage.getItem('model') || 'models/gemini-3.8-live',
+      model,
       generationConfig: {
         temperature: this.getTemperature(),
         top_p: 0.95,
         top_k: 65,
-        responseModalities: ['AUDIO'],
+        // 新 Live 模型仅输出音频 + 转写；旧 Native Audio 支持同时输出文本
+        responseModalities: isNewLive ? ['AUDIO'] : ['AUDIO', 'TEXT'],
         speechConfig: {
           voiceConfig: { prebuiltVoiceConfig: { voiceName: localStorage.getItem('voice') || 'Aoede' } }
         },
-        outputAudioTranscription: {},
-        inputAudioTranscription: {},
+        ...(isNewLive ? {
+          outputAudioTranscription: {},
+          inputAudioTranscription: {},
+        } : {}),
       },
       systemInstruction: { parts: [{ text: localStorage.getItem('systemInstructions') || 'You are a helpful assistant.' }] },
       realtimeInputConfig: {
