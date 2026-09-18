@@ -4,7 +4,7 @@ const indexHTML = `<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>GMP - Realtime Playground</title>
-    <link rel="stylesheet" href="/css/styles.css?v=10">
+    <link rel="stylesheet" href="/css/styles.css?v=11">
 </head>
 <body>
     <!-- Toast 通知容器 -->
@@ -125,7 +125,7 @@ const indexHTML = `<!DOCTYPE html>
         </div>
     </div>
 
-    <script src="/js/script.js?v=10"></script>
+    <script src="/js/script.js?v=11"></script>
 </body>
 </html>`;
 
@@ -269,16 +269,48 @@ body {
     position: absolute;
     bottom: 120px;
     left: 12px;
-    width: 140px;
-    height: 90px;
+    width: 320px;
+    height: 240px;
+    min-width: 160px;
+    min-height: 90px;
+    max-width: 90vw;
+    max-height: 80vh;
     background: var(--bg-secondary);
     border-radius: 8px;
     border: 2px solid var(--border);
     display: none;
     overflow: hidden;
-    pointer-events: none;
+    resize: both;          /* 浏览器原生拖拽调大小 */
+    pointer-events: auto;
+    z-index: 50;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
 }
-.camera-preview video, .screen-preview video { width: 100%; height: 100%; object-fit: cover; }
+.camera-preview video, .screen-preview video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+
+/* 预览工具栏 */
+.preview-toolbar {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    display: flex;
+    gap: 4px;
+    z-index: 2;
+}
+.pv-btn {
+    background: rgba(0,0,0,0.6);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    width: 24px;
+    height: 24px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    touch-action: manipulation;
+}
+.pv-btn:hover { background: rgba(0,0,0,0.85); }
 
 .input-area {
     display: flex;
@@ -432,7 +464,7 @@ body {
     .app-title { font-size: 1rem; }
     .role-btn { padding: 4px 6px; font-size: 0.85rem; }
     .visualizer-container { width: 40px; height: 40px; bottom: 110px; right: 8px; }
-    .camera-preview, .screen-preview { width: 120px; height: 80px; bottom: 110px; left: 8px; }
+    .camera-preview, .screen-preview { width: 200px; height: 150px; bottom: 110px; left: 8px; }
     .nav-btn { font-size: 1.2rem; }
 }
 
@@ -866,6 +898,7 @@ class RealtimeAgent {
       const preview = document.getElementById('cameraPreview');
       preview.innerHTML = '';
       preview.appendChild(video);
+      this.addPreviewToolbar(preview, 'camera');
       preview.style.display = 'block';
       this.isCameraActive = true;
       this.captureFrame();
@@ -875,6 +908,28 @@ class RealtimeAgent {
       this.isCameraActive = false;
       document.getElementById('cameraBtn').classList.remove('active');
     }
+  }
+
+  addPreviewToolbar(container, kind) {
+    const bar = document.createElement('div');
+    bar.className = 'preview-toolbar';
+    bar.innerHTML =
+      '<button class="pv-btn" data-act="full" title="全屏"><i class="fa-solid fa-expand"></i></button>' +
+      '<button class="pv-btn" data-act="reset" title="重置大小"><i class="fa-solid fa-rotate-left"></i></button>' +
+      '<button class="pv-btn" data-act="close" title="关闭"><i class="fa-solid fa-xmark"></i></button>';
+    bar.querySelector('[data-act=full]').onclick = () => {
+      if (container.requestFullscreen) container.requestFullscreen();
+    };
+    bar.querySelector('[data-act=reset]').onclick = () => {
+      container.style.width = '';
+      container.style.height = '';
+    };
+    bar.querySelector('[data-act=close]').onclick = () => {
+      container.style.display = 'none';
+      if (kind === 'camera') this.stopCamera();
+      else this.stopScreen();
+    };
+    container.appendChild(bar);
   }
 
   stopCamera() {
@@ -912,6 +967,7 @@ class RealtimeAgent {
       const preview = document.getElementById('screenPreview');
       preview.innerHTML = '';
       preview.appendChild(video);
+      this.addPreviewToolbar(preview, 'screen');
       preview.style.display = 'block';
       video.play().catch(() => {});
       this.isScreenActive = true;
