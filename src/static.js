@@ -4,7 +4,7 @@ const indexHTML = `<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>GMP - Realtime Playground</title>
-    <link rel="stylesheet" href="/css/styles.css?v=9">
+    <link rel="stylesheet" href="/css/styles.css?v=10">
 </head>
 <body>
     <!-- Toast 通知容器 -->
@@ -125,7 +125,7 @@ const indexHTML = `<!DOCTYPE html>
         </div>
     </div>
 
-    <script src="/js/script.js?v=9"></script>
+    <script src="/js/script.js?v=10"></script>
 </body>
 </html>`;
 
@@ -995,7 +995,7 @@ class GeminiAgent extends RealtimeAgent {
       realtimeInputConfig: {
         automaticActivityDetection: {
           disabled: false,
-          silenceThresholdMs: 1000,
+          silenceDurationMs: 1000,
           prefixPaddingMs: 300,
         },
         turnCoverage: 'TURN_INCLUDES_ALL_INPUT',
