@@ -26,6 +26,10 @@ export default {
       return handleSummarize(request, env);
     }
 
+    if (url.pathname === '/api/public-config' && request.method === 'GET') {
+      return handlePublicConfig(request, env);
+    }
+
     if (url.pathname === '/' || url.pathname === '/index.html') {
       return new Response(indexHTML, {
         headers: { 'content-type': 'text/html;charset=UTF-8' },
@@ -458,6 +462,18 @@ async function handleCompletions(req, apiKey, stream) {
  */
 export async function onRequestGet(context) {
   const { env } = context;
+  return new Response(JSON.stringify({
+    baseUrl: 'https://generativelanguage.googleapis.com',
+    apiVersion: 'v1beta',
+    hasGoogleKey: !!env.GOOGLE_API_KEY,
+    hasMinimaxKey: !!env.MINIMAX_API_KEY,
+    hasZhipuKey: !!env.ZHIPU_API_KEY,
+  }), {
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+  });
+}
+
+async function handlePublicConfig(request, env) {
   return new Response(JSON.stringify({
     baseUrl: 'https://generativelanguage.googleapis.com',
     apiVersion: 'v1beta',
