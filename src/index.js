@@ -450,3 +450,21 @@ async function handleCompletions(req, apiKey, stream) {
   });
 }
 
+
+/**
+ * GET /api/public-config
+ * 返回非敏感的运行信息（供前端用于模型可用性探测）。
+ * 不泄露任何 API Key 本身，只返回是否已绑定。
+ */
+export async function onRequestGet(context) {
+  const { env } = context;
+  return new Response(JSON.stringify({
+    baseUrl: 'https://generativelanguage.googleapis.com',
+    apiVersion: 'v1beta',
+    hasGoogleKey: !!env.GOOGLE_API_KEY,
+    hasMinimaxKey: !!env.MINIMAX_API_KEY,
+    hasZhipuKey: !!env.ZHIPU_API_KEY,
+  }), {
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+  });
+}

@@ -986,6 +986,12 @@ class GeminiAgent extends RealtimeAgent {
     this.provider = 'gemini';
     this.sampleRate = 16000;
   }
+  getDefaultModel() {
+    return 'models/gemini-3.8-live';
+  }
+  get fallbackModel() {
+    return 'models/gemini-2.5-flash-native-audio-preview-12-2025';
+  }
 
   getConfig() {
     return {
@@ -1279,10 +1285,23 @@ class ChatUI {
       const btn = document.getElementById('connectBtn');
       const orig = btn.innerHTML;
       btn.disabled = true;
-      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 连接中';
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 检测中';
       try {
+        // 1️⃣ 探测当前所选模型是否可用
+        const wanted = this.agent.getSelectedModel ? this.agent.getSelectedModel() : null;
+        const ok = wanted ? await this.probeModel(wanted) : true;
+        if (!ok) {
+          // 2️⃣ 不可用 → 降级到默认 fallback
+          const fallback = this.agent.fallbackModel || 'models/gemini-2.5-flash-native-audio-preview-12-2025';
+          showToast('当前模型不可用，已降级到 ' + fallback, 'info', 3000);
+          this.setModel(fallback);
+          // 重新创建 agent 以加载新模型
+          this.agent.disconnect();
+          this.agent = this.createAgent();
+          this.bindAgentCallbacks();
+        }
         await this.agent.connect();
-        showToast('已连接', 'success', 1500);
+        showToast('已连接 ' + (localStorage.getItem('model') || ''), 'success', 1500);
       } catch (e) {
         showToast('连接失败：' + (e.message || e), 'error', 4000);
       } finally {
@@ -1469,6 +1488,49 @@ class ChatUI {
       });
     }
     this._pendingBatch.push({ role, content });
+  }
+
+  /* ===== 模型可用性探测 & 自动降级 ===== */
+  getSelectedModel() {
+    return localStorage.getItem('model') || (this.agent && this.agent.getDefaultModel && this.agent.getDefaultModel());
+  }
+  setModel(modelId) {
+    localStorage.setItem('model', modelId);
+    const sel = document.getElementById('modelSelect');
+    if (sel) {
+      // 如果下拉框中没有该选项，动态加入
+      if (![...sel.options].some(o => o.value === modelId)) {
+        const opt = document.createElement('option');
+        opt.value = modelId;
+        opt.textContent = modelId + ' (降级)';
+        sel.appendChild(opt);
+      }
+      sel.value = modelId;
+    }
+  }
+  async probeModel(modelId) {
+    // 用 Google REST API 查询模型信息（不需要额外配额）
+    try {
+      const key = await this.fetchGoogleKey();
+      if (!key) return true; // 拿不到 Key 时跳过探测
+      const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(modelId) + '?key=' + key;
+      const resp = await fetch(url);
+      return resp.ok;
+    } catch (e) {
+      console.warn('[GMP] probeModel failed, skip', e);
+      return true; // 探测失败不阻断连接
+    }
+  }
+  async fetchGoogleKey() {
+    // 优先从 localStorage 读取用户输入的 Key（如果之前有暴露），否则调用后端公开配置接口
+    try {
+      const r = await fetch('/api/public-config');
+      if (r.ok) {
+        const cfg = await r.json();
+        return cfg.googleApiKey || null;
+      }
+    } catch {}
+    return null;
   }
 
   setupAudioPipeline() {
