@@ -4,7 +4,7 @@ const indexHTML = `<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>GMP - Realtime Playground</title>
-    <link rel="stylesheet" href="/css/styles.css?v=4">
+    <link rel="stylesheet" href="/css/styles.css?v=5">
 </head>
 <body>
     <!-- Toast 通知容器 -->
@@ -125,7 +125,7 @@ const indexHTML = `<!DOCTYPE html>
         </div>
     </div>
 
-    <script src="/js/script.js?v=4"></script>
+    <script src="/js/script.js?v=5"></script>
 </body>
 </html>`;
 
@@ -1029,7 +1029,12 @@ class GeminiAgent extends RealtimeAgent {
   async sendAudio(pcmData) {
     const base64 = this.toBase64(pcmData);
     const payload = JSON.stringify({
-      realtimeInput: { mediaChunks: [{ mimeType: 'audio/pcm;rate=' + this.sampleRate, data: base64 }] },
+      realtimeInput: {
+        audio: {
+          data: base64,
+          mimeType: 'audio/pcm;rate=' + this.sampleRate,
+        },
+      },
     });
     try {
       // 使用浏览器原生 CompressionStream (gzip) 压缩，再以二进制发送
@@ -1042,7 +1047,7 @@ class GeminiAgent extends RealtimeAgent {
       this.ws && this.ws.readyState === WebSocket.OPEN && this.ws.send(merged.buffer);
     } catch (e) {
       // 压缩失败则回退到原始 JSON
-      this.send({ realtimeInput: { mediaChunks: [{ mimeType: 'audio/pcm;rate=' + this.sampleRate, data: base64 }] } });
+      this.send({ realtimeInput: { audio: { data: base64, mimeType: 'audio/pcm;rate=' + this.sampleRate } } });
     }
   }
 
