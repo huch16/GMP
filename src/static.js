@@ -1060,6 +1060,10 @@ class GeminiAgent extends RealtimeAgent {
         return;
       }
       if (msg.setupComplete) { this.isConnected = true; this.onConnect?.(); }
+      // 模型输出音频转写（同时拥有文字 + 音频）
+      if (msg.serverContent?.outputAudioTranscription?.text) {
+        this.onText?.(msg.serverContent.outputAudioTranscription.text);
+      }
       if (msg.serverContent?.modelTurn?.parts) {
         for (const part of msg.serverContent.modelTurn.parts) {
           if (part.text) { this.onText?.(part.text); }
