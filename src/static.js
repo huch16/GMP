@@ -1052,7 +1052,7 @@ class GeminiAgent extends RealtimeAgent {
   }
 
   sendImage(imageData) {
-    this.send({ realtimeInput: { mediaChunks: [{ mimeType: 'image/jpeg', data: imageData }] } });
+    this.send({ realtimeInput: { video: { data: imageData, mimeType: 'image/jpeg' } } });
   }
 
   handleMessage(data) {
