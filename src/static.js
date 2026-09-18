@@ -4,7 +4,7 @@ const indexHTML = `<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>GMP - Realtime Playground</title>
-    <link rel="stylesheet" href="/css/styles.css">
+    <link rel="stylesheet" href="/css/styles.css?v=3">
 </head>
 <body>
     <!-- Toast 通知容器 -->
@@ -125,7 +125,7 @@ const indexHTML = `<!DOCTYPE html>
         </div>
     </div>
 
-    <script src="/js/script.js"></script>
+    <script src="/js/script.js?v=3"></script>
 </body>
 </html>`;
 

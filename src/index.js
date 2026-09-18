@@ -32,7 +32,10 @@ export default {
 
     if (url.pathname === '/' || url.pathname === '/index.html') {
       return new Response(indexHTML, {
-        headers: { 'content-type': 'text/html;charset=UTF-8' },
+        headers: {
+          'content-type': 'text/html;charset=UTF-8',
+          'cache-control': 'no-store, no-cache, must-revalidate, max-age=0',
+        },
       });
     }
 
@@ -41,7 +44,12 @@ export default {
       const key = url.pathname.slice(1);
       const content = url.pathname.startsWith('/css/') ? cssFiles[key] : jsFiles[key];
       if (content) {
-        return new Response(content, { headers: { 'content-type': contentType } });
+        return new Response(content, {
+          headers: {
+            'content-type': contentType,
+            'cache-control': 'no-store, no-cache, must-revalidate, max-age=0',
+          },
+        });
       }
     }
 
