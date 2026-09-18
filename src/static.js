@@ -994,7 +994,7 @@ class GeminiAgent extends RealtimeAgent {
         temperature: this.getTemperature(),
         top_p: 0.95,
         top_k: 65,
-        responseModalities: ['AUDIO'],
+        responseModalities: ['AUDIO', 'TEXT'],
         speechConfig: {
           voiceConfig: { prebuiltVoiceConfig: { voiceName: localStorage.getItem('voice') || 'Aoede' } }
         }
@@ -1046,6 +1046,13 @@ class GeminiAgent extends RealtimeAgent {
   handleMessage(data) {
     try {
       const msg = JSON.parse(data);
+      // 上游错误（如模型不可用、配额超限）弹 Toast 并返回
+      if (msg.error) {
+        const errMsg = (msg.error.message || msg.error.code || JSON.stringify(msg.error));
+        console.error('[Gemini] upstream error:', errMsg);
+        this.onError?.('模型错误：' + errMsg);
+        return;
+      }
       if (msg.setupComplete) { this.isConnected = true; this.onConnect?.(); }
       if (msg.serverContent?.modelTurn?.parts) {
         for (const part of msg.serverContent.modelTurn.parts) {
