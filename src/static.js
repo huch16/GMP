@@ -4,7 +4,7 @@ const indexHTML = `<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>GMP - Realtime Playground</title>
-    <link rel="stylesheet" href="/css/styles.css?v=3">
+    <link rel="stylesheet" href="/css/styles.css?v=4">
 </head>
 <body>
     <!-- Toast 通知容器 -->
@@ -125,7 +125,7 @@ const indexHTML = `<!DOCTYPE html>
         </div>
     </div>
 
-    <script src="/js/script.js?v=3"></script>
+    <script src="/js/script.js?v=4"></script>
 </body>
 </html>`;
 
@@ -1000,11 +1000,12 @@ class GeminiAgent extends RealtimeAgent {
         temperature: this.getTemperature(),
         top_p: 0.95,
         top_k: 65,
-        responseModalities: ['AUDIO', 'TEXT'],
+        responseModalities: ['AUDIO'],
         speechConfig: {
           voiceConfig: { prebuiltVoiceConfig: { voiceName: localStorage.getItem('voice') || 'Aoede' } }
         }
       },
+      outputAudioTranscription: {},
       systemInstruction: { parts: [{ text: localStorage.getItem('systemInstructions') || 'You are a helpful assistant.' }] },
       realtimeInputConfig: {
         automaticActivityDetection: {
