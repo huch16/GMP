@@ -4,7 +4,7 @@ const indexHTML = `<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>GMP - Realtime Playground</title>
-    <link rel="stylesheet" href="/css/styles.css?v=7">
+    <link rel="stylesheet" href="/css/styles.css?v=8">
 </head>
 <body>
     <!-- Toast 通知容器 -->
@@ -125,7 +125,7 @@ const indexHTML = `<!DOCTYPE html>
         </div>
     </div>
 
-    <script src="/js/script.js?v=7"></script>
+    <script src="/js/script.js?v=8"></script>
 </body>
 </html>`;
 
@@ -1002,8 +1002,8 @@ class GeminiAgent extends RealtimeAgent {
         temperature: this.getTemperature(),
         top_p: 0.95,
         top_k: 65,
-        // 新 Live 模型仅输出音频 + 转写；旧 Native Audio 支持同时输出文本
-        responseModalities: isNewLive ? ['AUDIO'] : ['AUDIO', 'TEXT'],
+        // 所有 Live 模型仅输出 AUDIO；文本来自 outputAudioTranscription（仅 3.x 支持）
+        responseModalities: ['AUDIO'],
         speechConfig: {
           voiceConfig: { prebuiltVoiceConfig: { voiceName: localStorage.getItem('voice') || 'Aoede' } }
         },
@@ -1072,10 +1072,11 @@ class GeminiAgent extends RealtimeAgent {
         return;
       }
       if (msg.setupComplete) { this.isConnected = true; this.onConnect?.(); }
-      // 模型输出音频转写（同时拥有文字 + 音频）
+      // 模型输出音频转写（仅 3.x Live 支持）
       if (msg.serverContent?.outputAudioTranscription?.text) {
         this.onText?.(msg.serverContent.outputAudioTranscription.text);
       }
+      // 对于 2.5 native audio（无 transcription），标记收到音频
       if (msg.serverContent?.modelTurn?.parts) {
         for (const part of msg.serverContent.modelTurn.parts) {
           if (part.text) { this.onText?.(part.text); }
