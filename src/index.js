@@ -140,6 +140,21 @@ function relay(proxy, upstream) {
       } catch (e) { /* fallthrough */ }
       return;
     }
+    // Handle tool_request messages from frontend
+    try {
+      const msg = JSON.parse(data);
+      if (msg.type === 'tool_request') {
+        // Forward tool request to upstream
+        if (upstream.readyState === WebSocket.OPEN) {
+          upstream.send(JSON.stringify(msg));
+        } else {
+          pendingMessages.push(JSON.stringify(msg));
+        }
+        return;
+      }
+    } catch (e) {
+      // Not JSON, continue normal handling
+    }
     if (upstream.readyState === WebSocket.OPEN) {
       upstream.send(data);
     } else {
@@ -148,18 +163,32 @@ function relay(proxy, upstream) {
   });
   upstream.addEventListener('message', (event) => {
     if (proxy.readyState === WebSocket.OPEN) {
-      proxy.send(normalizeWSData(event.data));
+      // Check for tool_result from upstream
+      const data = normalizeWSData(event.data);
+      try {
+        const msg = JSON.parse(data);
+        if (msg.type === 'tool_result') {
+          // Forward tool result to frontend
+          proxy.send(data);
+          return;
+        }
+      } catch (e) {
+        // Not JSON, continue normal handling
+      }
+      proxy.send(data);
     }
   });
   upstream.addEventListener('close', (event) => {
     if (proxy.readyState !== WebSocket.CLOSED) {
       proxy.close(event.code || 1000, event.reason || undefined);
     }
+    pendingMessages = []; // Clear pending messages on upstream close
   });
   proxy.addEventListener('close', (event) => {
     if (upstream.readyState !== WebSocket.CLOSED) {
       upstream.close(event.code || 1000, event.reason || undefined);
     }
+    pendingMessages = []; // Clear pending messages on proxy close
   });
   upstream.addEventListener('error', (event) => {
     let origin = '';
@@ -175,9 +204,15 @@ async function handleGeminiWebSocket(request, env) {
   if (!env.GOOGLE_API_KEY) {
     return new Response('GOOGLE_API_KEY not configured', { status: 500 });
   }
-  const ep = new URL(request.url).searchParams.get('ep') === 'alpha' ? 'v1alpha' : 'v1beta';
-  const targetUrl =
-    `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.${ep}.GenerativeService.BidiGenerateContent?key=${env.GOOGLE_API_KEY}`;
+  const url = new URL(request.url);
+  const ep = url.searchParams.get('ep') === 'alpha' ? 'v1alpha' : 'v1beta';
+  const thinkingTier = url.searchParams.get('thinking_tier') || 'none';
+  
+  let targetUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.${ep}.GenerativeService.BidiGenerateContent?key=${env.GOOGLE_API_KEY}`;
+  // Add thinking_tier as query param if supported by Gemini
+  if (thinkingTier !== 'none') {
+    targetUrl += `&thinking_tier=${encodeURIComponent(thinkingTier)}`;
+  }
 
   let upstream;
   try {
@@ -205,7 +240,12 @@ async function handleMiniMaxWebSocket(request, env) {
   }
   const url = new URL(request.url);
   const model = url.searchParams.get('model') || 'abab6.5s-chat';
-  const targetUrl = `wss://api.minimax.chat/ws/v1/realtime?model=${encodeURIComponent(model)}`;
+  const thinkingTier = url.searchParams.get('thinking_tier') || 'none';
+  
+  let targetUrl = `wss://api.minimax.chat/ws/v1/realtime?model=${encodeURIComponent(model)}`;
+  if (thinkingTier !== 'none') {
+    targetUrl += `&thinking_tier=${encodeURIComponent(thinkingTier)}`;
+  }
 
   const upstreamResp = await fetch(targetUrl, {
     headers: {
@@ -233,7 +273,13 @@ async function handleGLMWebSocket(request, env) {
   if (!env.ZHIPU_API_KEY) {
     return new Response('ZHIPU_API_KEY not configured', { status: 500 });
   }
-  const targetUrl = 'wss://open.bigmodel.cn/api/paas/v4/realtime';
+  const url = new URL(request.url);
+  const thinkingTier = url.searchParams.get('thinking_tier') || 'none';
+  
+  let targetUrl = 'wss://open.bigmodel.cn/api/paas/v4/realtime';
+  if (thinkingTier !== 'none') {
+    targetUrl += `?thinking_tier=${encodeURIComponent(thinkingTier)}`;
+  }
 
   const upstreamResp = await fetch(targetUrl, {
     headers: {

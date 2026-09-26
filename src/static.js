@@ -30,6 +30,10 @@ const indexHTML = `<!DOCTYPE html>
                 <button id="connectBtn" class="connect-btn">Connect</button>
                 <button id="disconnectBtn" class="disconnect-btn" style="display:none;">Disconnect</button>
             </div>
+            <div class="memory-controls" style="display: flex; gap: 8px; margin-left: 12px;">
+                <button id="summarizeBtn" class="btn-secondary" style="padding: 6px 10px; font-size: 0.85rem;">生成 AI 小结</button>
+                <button id="clearMemoryBtn" class="btn-secondary" style="padding: 6px 10px; font-size: 0.85rem;">清除对话记忆</button>
+            </div>
         </header>
 
         <!-- Chat area -->
@@ -94,11 +98,15 @@ const indexHTML = `<!DOCTYPE html>
             </select></label>
             <label>Voice: <input type="text" id="voiceInput" placeholder="Gemini: Aoede / MiniMax: female-yujie / GLM: tongtong"></label>
             <label>Temperature: <input type="range" id="tempInput" min="0" max="2" step="0.1" value="0.8"> <span id="tempValue">0.8</span></label>
+            <label>Thinking Tier: <select id="thinkingTierSelect">
+                <option value="none">无</option>
+                <option value="low">低</option>
+                <option value="medium" selected>中</option>
+                <option value="high">高</option>
+            </select></label>
             <label>System Instructions: <textarea id="systemInput" rows="3">You are a helpful assistant.</textarea></label>
             <label>Access Token (optional): <input type="password" id="accessTokenInput" placeholder="Leave empty if not required"></label>
             <p class="hint">API keys are stored as Worker secrets. Set <code>GOOGLE_API_KEY</code>, <code>MINIMAX_API_KEY</code> and <code>ZHIPU_API_KEY</code> via <code>wrangler secret put</code>.</p>
-            <button id="summarizeBtn" class="btn-secondary" style="margin-right:8px;">生成 AI 小结</button>
-            <button id="clearMemoryBtn" class="btn-secondary" style="margin-right:8px;">清除对话记忆</button>
             <button id="saveSettings" class="btn-primary">Save</button>
             <button id="closeSettings" class="btn-secondary">Close</button>
         </div>
