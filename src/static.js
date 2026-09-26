@@ -1051,8 +1051,6 @@ class GeminiAgent extends RealtimeAgent {
           voiceConfig: { prebuiltVoiceConfig: { voiceName: localStorage.getItem('voice') || 'Aoede' } }
         },
         ...(isNewLive ? {
-          outputAudioTranscription: {},
-          inputAudioTranscription: {},
         } : {}),
       },
       systemInstruction: { parts: [{ text: localStorage.getItem('systemInstructions') || 'You are a helpful assistant.' }] },
