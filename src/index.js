@@ -120,12 +120,46 @@ function normalizeWSData(data) {
 }
 
 function relay(proxy, upstream) {
+  const MAX_PENDING_MESSAGES = 256;
+  const MAX_PENDING_AGE_MS = 15000;
   let pendingMessages = [];
-  upstream.addEventListener('open', () => {
-    for (const msg of pendingMessages) {
-      upstream.send(msg);
+  const prunePendingMessages = () => {
+    const cutoff = Date.now() - MAX_PENDING_AGE_MS;
+    pendingMessages = pendingMessages.filter(msg => msg.queuedAt >= cutoff);
+    if (pendingMessages.length > MAX_PENDING_MESSAGES) {
+      const dropped = pendingMessages.length - MAX_PENDING_MESSAGES;
+      pendingMessages.splice(0, dropped);
+      console.warn('RELAY_PENDING_QUEUE_DROPPED', { dropped, remaining: pendingMessages.length });
     }
-    pendingMessages = [];
+  };
+  const enqueuePendingMessage = (data, reason) => {
+    prunePendingMessages();
+    if (pendingMessages.length >= MAX_PENDING_MESSAGES) {
+      const dropped = pendingMessages.length - MAX_PENDING_MESSAGES + 1;
+      pendingMessages.splice(0, dropped);
+      console.warn('RELAY_PENDING_QUEUE_FULL', { dropped, reason, remaining: pendingMessages.length });
+    }
+    pendingMessages.push({ data, queuedAt: Date.now() });
+  };
+  const flushPendingMessages = () => {
+    if (upstream.readyState !== WebSocket.OPEN) return;
+    const now = Date.now();
+    const next = [];
+    for (const item of pendingMessages) {
+      if (now - item.queuedAt > MAX_PENDING_AGE_MS) continue;
+      try {
+        upstream.send(item.data);
+      } catch (e) {
+        console.warn('RELAY_PENDING_SEND_FAILED', { message: e?.message || 'send failed' });
+        next.push(item);
+      }
+    }
+    pendingMessages = next;
+  };
+  const pruneTimer = setInterval(prunePendingMessages, 1000);
+
+  upstream.addEventListener('open', () => {
+    flushPendingMessages();
   });
   proxy.addEventListener('message', (event) => {
     // 解压前端发送的压缩音频帧：第一个字节 0x01 表示后跟 gzip 数据
@@ -135,7 +169,7 @@ function relay(proxy, upstream) {
         const stream = new Response(new Blob([data.slice(1)]).stream().pipeThrough(new DecompressionStream('gzip')));
         stream.text().then((text) => {
           if (upstream.readyState === WebSocket.OPEN) upstream.send(text);
-          else pendingMessages.push(text);
+          else enqueuePendingMessage(text, 'gzip-audio');
         }).catch(() => {});
       } catch (e) { /* fallthrough */ }
       return;
@@ -148,7 +182,7 @@ function relay(proxy, upstream) {
         if (upstream.readyState === WebSocket.OPEN) {
           upstream.send(JSON.stringify(msg));
         } else {
-          pendingMessages.push(JSON.stringify(msg));
+          enqueuePendingMessage(JSON.stringify(msg), 'tool_request');
         }
         return;
       }
@@ -158,7 +192,7 @@ function relay(proxy, upstream) {
     if (upstream.readyState === WebSocket.OPEN) {
       upstream.send(data);
     } else {
-      pendingMessages.push(data);
+      enqueuePendingMessage(data, 'proxy-to-upstream');
     }
   });
   upstream.addEventListener('message', (event) => {
@@ -182,13 +216,15 @@ function relay(proxy, upstream) {
     if (proxy.readyState !== WebSocket.CLOSED) {
       proxy.close(event.code || 1000, event.reason || undefined);
     }
-    pendingMessages = []; // Clear pending messages on upstream close
+    pendingMessages = [];
+    clearInterval(pruneTimer);
   });
   proxy.addEventListener('close', (event) => {
     if (upstream.readyState !== WebSocket.CLOSED) {
       upstream.close(event.code || 1000, event.reason || undefined);
     }
-    pendingMessages = []; // Clear pending messages on proxy close
+    pendingMessages = [];
+    clearInterval(pruneTimer);
   });
   upstream.addEventListener('error', (event) => {
     let origin = '';
@@ -507,7 +543,6 @@ async function handleCompletions(req, apiKey, stream) {
     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
   });
 }
-
 
 /**
  * GET /api/public-config
