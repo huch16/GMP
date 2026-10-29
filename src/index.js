@@ -3,6 +3,17 @@ const ASSETS_MANIFEST = {};
 
 export default {
   async fetch(request, env, ctx) {
+    // 全局 CORS 预检请求处理，允许跨域 REST 调用
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+          'Access-Control-Allow-Headers': '*',
+        },
+      });
+    }
+
     const url = new URL(request.url);
 
     if ((request.headers.get('Upgrade') || '').toLowerCase() === 'websocket') {
@@ -47,7 +58,7 @@ export default {
         return new Response(content, {
           headers: {
             'content-type': contentType,
-            'cache-control': 'no-store, no-cache, must-revalidate, max-age=0',
+            'cache-control': 'public, max-age=600, s-maxage=3600',
           },
         });
       }
@@ -66,7 +77,6 @@ export default {
  */
 async function handleSummarize(request, env) {
   if (!checkAuth(request, env)) return new Response('Unauthorized', { status: 401 });
-  if (!env.AI) return new Response('AI binding missing', { status: 503 });
 
   let body;
   try { body = await request.json(); } catch { return new Response('Invalid JSON', { status: 400 }); }
@@ -82,22 +92,78 @@ async function handleSummarize(request, env) {
     .join('\n');
   const prompt = `请将以下对话压缩为一段不超过 150 字的中文摘要，保留关键事实、意图、结论，供后续会话继续使用：\n${transcript}`;
 
-  try {
-    const result = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fp8', {
-      prompt,
-      max_tokens: 200,
-      temperature: 0.4,
-    });
-    const summary = (typeof result === 'string' ? result : (result?.response || result?.text || '')).trim();
-    return new Response(JSON.stringify({ summary }), {
-      headers: { 'content-type': 'application/json' },
-    });
-  } catch (e) {
-    return new Response(JSON.stringify({ error: e.message || 'AI error' }), {
-      status: 500,
-      headers: { 'content-type': 'application/json' },
-    });
+  // 1. 优先使用 Cloudflare Workers AI（若已绑定）
+  if (env.AI) {
+    try {
+      const result = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fp8', {
+        prompt,
+        max_tokens: 200,
+        temperature: 0.4,
+      });
+      const summary = (typeof result === 'string' ? result : (result?.response || result?.text || '')).trim();
+      return new Response(JSON.stringify({ summary }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    } catch (e) {
+      console.log('WORKERS_AI_FAIL, fallback to API key:', e.message);
+    }
   }
+
+  // 2. 备用一：智谱 GLM-4-Flash 极速中文小结
+  if (env.ZHIPU_API_KEY) {
+    try {
+      const resp = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${env.ZHIPU_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: 'glm-4-flash',
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 200,
+          temperature: 0.3,
+        }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        const summary = (data.choices?.[0]?.message?.content || '').trim();
+        return new Response(JSON.stringify({ summary }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+    } catch (e) {
+      console.log('ZHIPU_SUMMARY_FAIL:', e.message);
+    }
+  }
+
+  // 3. 备用二：Google Gemini Flash 小结
+  if (env.GOOGLE_API_KEY) {
+    try {
+      const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${env.GOOGLE_API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 200, temperature: 0.3 },
+        }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        const summary = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+        return new Response(JSON.stringify({ summary }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+    } catch (e) {
+      console.log('GEMINI_SUMMARY_FAIL:', e.message);
+    }
+  }
+
+  return new Response(JSON.stringify({ error: 'No AI binding or API key available for summary' }), {
+    status: 503,
+    headers: { 'content-type': 'application/json' },
+  });
 }
 
 function checkAuth(request, env) {
@@ -121,12 +187,20 @@ function normalizeWSData(data) {
 
 function relay(proxy, upstream) {
   let pendingMessages = [];
-  upstream.addEventListener('open', () => {
-    for (const msg of pendingMessages) {
-      upstream.send(msg);
+
+  const flushPending = () => {
+    while (pendingMessages.length > 0) {
+      const msg = pendingMessages.shift();
+      try { upstream.send(msg); } catch (e) {}
     }
-    pendingMessages = [];
-  });
+  };
+
+  if (upstream.readyState === WebSocket.OPEN) {
+    flushPending();
+  } else {
+    upstream.addEventListener('open', flushPending);
+  }
+
   proxy.addEventListener('message', (event) => {
     // 解压前端发送的压缩音频帧：第一个字节 0x01 表示后跟 gzip 数据
     const data = event.data;
@@ -140,6 +214,20 @@ function relay(proxy, upstream) {
       } catch (e) { /* fallthrough */ }
       return;
     }
+
+    // 拦截客户端心跳 Ping，保持 Cloudflare 边缘连接活跃（防止 100 秒空闲强断），不透传给上游大模型
+    if (typeof data === 'string' && data.includes('"ping"')) {
+      try {
+        const msg = JSON.parse(data);
+        if (msg.type === 'ping') {
+          if (proxy.readyState === WebSocket.OPEN) {
+            proxy.send(JSON.stringify({ type: 'pong' }));
+          }
+          return;
+        }
+      } catch (e) {}
+    }
+
     // Handle tool_request messages from frontend
     try {
       const msg = JSON.parse(data);
@@ -396,8 +484,18 @@ async function handleEmbeddings(req, apiKey) {
   });
 }
 
+const MODEL_ALIASES = {
+  'gpt-4o': 'gemini-2.5-flash',
+  'gpt-4o-mini': 'gemini-2.5-flash',
+  'gpt-4': 'gemini-2.5-pro',
+  'gpt-3.5-turbo': 'gemini-2.5-flash',
+  'gemini-flash': 'gemini-2.5-flash',
+  'gemini-pro': 'gemini-2.5-pro',
+};
+
 async function handleCompletions(req, apiKey, stream) {
-  let model = req.model?.startsWith('models/') ? req.model.slice(7) : (req.model || 'gemini-1.5-pro-latest');
+  let rawModel = req.model?.startsWith('models/') ? req.model.slice(7) : (req.model || 'gemini-2.5-flash');
+  let model = MODEL_ALIASES[rawModel] || rawModel;
   const task = stream ? 'streamGenerateContent' : 'generateContent';
   let url = `${BASE_URL}/v1beta/models/${model}:${task}`;
   if (stream) url += '?alt=sse';

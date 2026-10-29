@@ -685,6 +685,24 @@ class RealtimeAgent {
     this.screenStream = null;
     this.cameraFacing = 'user';
     this.frameIntervalMs = 1000;
+    this.heartbeatTimer = null;
+    this._cachedCanvas = null;
+  }
+
+  startHeartbeat() {
+    this.stopHeartbeat();
+    this.heartbeatTimer = setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify({ type: 'ping' }));
+      }
+    }, 25000);
+  }
+
+  stopHeartbeat() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
   }
 
   getSampleRate() {
@@ -705,7 +723,11 @@ class RealtimeAgent {
     const wsUrl = 'wss://' + location.host + this.wsPath();
     this.ws = new WebSocket(wsUrl);
     this.ws.binaryType = 'arraybuffer';
-    this.ws.onopen = () => { this.isConnected = true; this.sendSetup(); };
+    this.ws.onopen = () => {
+      this.isConnected = true;
+      this.startHeartbeat();
+      this.sendSetup();
+    };
     this.ws.onmessage = async (e) => {
       let data = e.data;
       try {
@@ -716,6 +738,7 @@ class RealtimeAgent {
     };
     this.ws.onclose = (e) => {
       this.isConnected = false;
+      this.stopHeartbeat();
       this.onDisconnect?.();
       if (e.code && e.code !== 1000 && e.code !== 1005 && e.code !== 1006) {
         this.onError?.('连接关闭 (' + e.code + ')：' + (e.reason || '未知原因'));
@@ -725,6 +748,7 @@ class RealtimeAgent {
   }
 
   disconnect() {
+    this.stopHeartbeat();
     if (this.ws) { this.ws.close(); this.ws = null; }
     this.stopRecording();
     this.stopCamera();
@@ -1008,17 +1032,23 @@ class RealtimeAgent {
   sendVideoFrame(selector) {
     const video = document.querySelector(selector);
     if (!video || video.readyState < 2) return;
+    // 弱网背压防护：如果 WebSocket 缓冲区积压超过 64KB，跳过本帧，优先保障实时音频流
+    if (this.ws && this.ws.bufferedAmount > 65536) return;
     try {
-      const canvas = document.createElement('canvas');
-      canvas.width = 640; canvas.height = 360;
-      canvas.getContext('2d').drawImage(video, 0, 0, 640, 360);
-      canvas.toBlob((blob) => {
+      if (!this._cachedCanvas) {
+        this._cachedCanvas = document.createElement('canvas');
+        this._cachedCanvas.width = 640;
+        this._cachedCanvas.height = 360;
+      }
+      const ctx = this._cachedCanvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, 640, 360);
+      this._cachedCanvas.toBlob((blob) => {
         if (blob) {
           const reader = new FileReader();
           reader.onloadend = () => { const base64 = reader.result.split(',')[1]; this.sendImage(base64); };
           reader.readAsDataURL(blob);
         }
-      }, 'image/jpeg', 0.7);
+      }, 'image/jpeg', 0.65);
     } catch (e) {}
   }
 }
@@ -1107,6 +1137,7 @@ class GeminiAgent extends RealtimeAgent {
   handleMessage(data) {
     try {
       const msg = JSON.parse(data);
+      if (msg && msg.type === 'pong') return;
       // 上游错误（如模型不可用、配额超限）弹 Toast 并返回
       if (msg.error) {
         const errMsg = (msg.error.message || msg.error.code || JSON.stringify(msg.error));
@@ -1193,6 +1224,7 @@ class MiniMaxAgent extends RealtimeAgent {
   handleMessage(data) {
     try {
       const msg = JSON.parse(data);
+      if (msg && msg.type === 'pong') return;
       switch (msg.type) {
         case 'session.created':
         case 'conversation.created':
@@ -1293,6 +1325,7 @@ class GLMAgent extends RealtimeAgent {
   handleMessage(data) {
     try {
       const msg = JSON.parse(data);
+      if (msg && msg.type === 'pong') return;
       switch (msg.type) {
         case 'session.updated':
           if (!this._booted) { this._booted = true; this.isConnected = true; this.onConnect?.(); }
@@ -1341,7 +1374,19 @@ class ChatUI {
   }
 
   setupEventListeners() {
+    const unlockAudio = () => {
+      if (this.audioCtx && this.audioCtx.state === 'suspended') {
+        this.audioCtx.resume().catch(() => {});
+      } else if (!this.audioCtx) {
+        this.setupAudioPipeline();
+      }
+    };
+    // 监听初次手势交互解锁移动端 Web Audio 静音拦截策略 (iOS Safari / Android)
+    window.addEventListener('touchstart', unlockAudio, { once: true, passive: true });
+    window.addEventListener('click', unlockAudio, { once: true, passive: true });
+
     document.getElementById('connectBtn').onclick = async () => {
+      unlockAudio();
       const btn = document.getElementById('connectBtn');
       const orig = btn.innerHTML;
       btn.disabled = true;
@@ -1369,7 +1414,10 @@ class ChatUI {
         btn.innerHTML = orig;
       }
     };
-    document.getElementById('disconnectBtn').onclick = () => this.agent.disconnect();
+    document.getElementById('disconnectBtn').onclick = () => {
+      this.stopAudio();
+      this.agent.disconnect();
+    };
     document.getElementById('micBtn').onclick = async () => {
       const btn = document.getElementById('micBtn');
       if (this.agent.isConnected) {
@@ -1459,9 +1507,14 @@ class ChatUI {
     document.getElementById('accessTokenInput').value = localStorage.getItem('accessToken') || '';
 
     this.agent.onConnect = () => { document.getElementById('connectBtn').style.display = 'none'; document.getElementById('disconnectBtn').style.display = 'block'; };
-    this.agent.onDisconnect = () => { document.getElementById('connectBtn').style.display = 'block'; document.getElementById('disconnectBtn').style.display = 'none'; };
+    this.agent.onDisconnect = () => {
+      this.stopAudio();
+      document.getElementById('connectBtn').style.display = 'block';
+      document.getElementById('disconnectBtn').style.display = 'none';
+    };
     this.agent.onText = (text) => { this.addMessage('assistant', text); saveMemory('assistant', text); };
     this.agent.onTurnComplete = () => {};
+    this.agent.onInterrupted = () => this.stopAudio();
     this.agent.onUserTranscript = (text) => this.addMessage('user', text);
     this.agent.onAudio = (buffer, sampleRate) => this.playPcm(buffer, sampleRate);
     this.agent.onError = (msg) => this.addMessage('system', msg);
@@ -1487,6 +1540,7 @@ class ChatUI {
     localStorage.setItem('systemInstructions', document.getElementById('systemInput').value);
     if (window.roleManager) window.roleManager.updateCurrentSystemPrompt(document.getElementById('systemInput').value);
     localStorage.setItem('accessToken', document.getElementById('accessTokenInput').value);
+    this.stopAudio();
     this.agent.disconnect();
     this.agent = this.createAgent();
     this.bindAgentCallbacks();
@@ -1495,9 +1549,14 @@ class ChatUI {
 
   bindAgentCallbacks() {
     this.agent.onConnect = () => { document.getElementById('connectBtn').style.display = 'none'; document.getElementById('disconnectBtn').style.display = 'block'; };
-    this.agent.onDisconnect = () => { document.getElementById('connectBtn').style.display = 'block'; document.getElementById('disconnectBtn').style.display = 'none'; };
+    this.agent.onDisconnect = () => {
+      this.stopAudio();
+      document.getElementById('connectBtn').style.display = 'block';
+      document.getElementById('disconnectBtn').style.display = 'none';
+    };
     this.agent.onText = (text) => { this.addMessage('assistant', text); saveMemory('assistant', text); };
     this.agent.onTurnComplete = () => {};
+    this.agent.onInterrupted = () => this.stopAudio();
     this.agent.onUserTranscript = (text) => this.addMessage('user', text);
     this.agent.onAudio = (buffer, sampleRate) => this.playPcm(buffer, sampleRate);
     this.agent.onError = (msg) => this.addMessage('system', msg);
@@ -1569,76 +1628,126 @@ class ChatUI {
     }
   }
   async probeModel(modelId) {
-    // 用 Google REST API 查询模型信息（不需要额外配额）
+    // 走服务端 /v1/models 代理探测，彻底解决国内直连 Google 报错的问题
+    const provider = localStorage.getItem('provider') || 'gemini';
+    if (provider !== 'gemini') return true;
     try {
-      const key = await this.fetchGoogleKey();
-      if (!key) return true; // 拿不到 Key 时跳过探测
-      const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(modelId) + '?key=' + key;
-      const resp = await fetch(url);
-      return resp.ok;
+      const token = localStorage.getItem('accessToken') || '';
+      const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+      const resp = await fetch('/v1/models', { headers });
+      if (!resp.ok) return true; // 接口异常不阻断用户连接
+      const data = await resp.json();
+      const list = data.data || [];
+      const cleanId = modelId.replace('models/', '');
+      return list.some(m => m.id === cleanId || m.id === modelId);
     } catch (e) {
-      console.warn('[GMP] probeModel failed, skip', e);
-      return true; // 探测失败不阻断连接
+      console.warn('[GMP] probeModel fallback, skip probe', e);
+      return true;
     }
-  }
-  async fetchGoogleKey() {
-    // 优先从 localStorage 读取用户输入的 Key（如果之前有暴露），否则调用后端公开配置接口
-    try {
-      const r = await fetch('/api/public-config');
-      if (r.ok) {
-        const cfg = await r.json();
-        return cfg.googleApiKey || null;
-      }
-    } catch {}
-    return null;
   }
 
   setupAudioPipeline() {
     this.audioCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
-    if (this.audioCtx.state === 'suspended') this.audioCtx.resume();
+    if (this.audioCtx.state === 'suspended') this.audioCtx.resume().catch(() => {});
     this.gainNode = this.audioCtx.createGain();
-    this.gainNode.connect(this.audioCtx.destination);
     this.gainNode.gain.value = 0.8;
+
+    this.analyserNode = this.audioCtx.createAnalyser();
+    this.analyserNode.fftSize = 64;
+    this.gainNode.connect(this.analyserNode);
+    this.analyserNode.connect(this.audioCtx.destination);
+
+    this.nextAudioTime = 0;
+    this.activeAudioSources = new Set();
+    this.startVisualizer();
+  }
+
+  startVisualizer() {
+    if (this._visualizerRunning) return;
+    const canvas = document.getElementById('visualizer');
+    if (!canvas) return;
+    this._visualizerRunning = true;
+    const ctx = canvas.getContext('2d');
+    const buffer = new Uint8Array(this.analyserNode.frequencyBinCount);
+
+    const render = () => {
+      requestAnimationFrame(render);
+      if (!this.analyserNode) return;
+      this.analyserNode.getByteFrequencyData(buffer);
+      let sum = 0;
+      for (let i = 0; i < buffer.length; i++) sum += buffer[i];
+      const avg = sum / buffer.length;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (avg < 2) return;
+
+      const w = canvas.width || 50;
+      const h = canvas.height || 50;
+      const cx = w / 2;
+      const cy = h / 2;
+      const maxR = Math.min(cx, cy) - 2;
+      const r = 8 + (avg / 255) * (maxR - 8);
+
+      // 外光晕脉冲
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(233, 69, 96, 0.35)';
+      ctx.fill();
+
+      // 内核心
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.max(4, r * 0.65), 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(233, 69, 96, 0.9)';
+      ctx.fill();
+    };
+    render();
+  }
+
+  stopAudio() {
+    if (this.activeAudioSources) {
+      for (const src of this.activeAudioSources) {
+        try { src.stop(); src.disconnect(); } catch (e) {}
+      }
+      this.activeAudioSources.clear();
+    }
+    if (this.audioCtx) {
+      this.nextAudioTime = this.audioCtx.currentTime;
+    }
   }
 
   playPcm(buffer, sampleRate) {
     if (!this.audioCtx) this.setupAudioPipeline();
-    if (!this.pcmBuffer) { this.pcmBuffer = []; this.pcmSampleRate = sampleRate || 24000; }
-    this.pcmBuffer.push(buffer);
-    this.pcmSampleRate = sampleRate || this.pcmSampleRate;
-    if (!this.audioPlaying) {
-      this.audioPlaying = true;
-      this.flushAndPlay();
-    }
-  }
-
-  flushAndPlay() {
-    const chunks = this.pcmBuffer || [];
-    this.pcmBuffer = [];
-    if (!chunks.length) { this.audioPlaying = false; return; }
-    let total = 0;
-    for (const c of chunks) total += c.byteLength;
-    const merged = new Uint8Array(total);
-    let off = 0;
-    for (const c of chunks) { merged.set(new Uint8Array(c), off); off += c.byteLength; }
-    const ctx = this.audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = this.audioCtx;
     if (ctx.state === 'suspended') ctx.resume();
-    const view = new DataView(merged.buffer);
+
+    const view = new DataView(buffer instanceof ArrayBuffer ? buffer : buffer.buffer);
     const frameCount = view.byteLength / 2;
-    const audioBuffer = ctx.createBuffer(1, frameCount, this.pcmSampleRate || 24000);
-    const data = audioBuffer.getChannelData(0);
-    for (let i = 0; i < frameCount; i++) data[i] = view.getInt16(i * 2, true) / 32768;
+    if (frameCount <= 0) return;
+
+    const rate = sampleRate || 24000;
+    const audioBuffer = ctx.createBuffer(1, frameCount, rate);
+    const channelData = audioBuffer.getChannelData(0);
+    for (let i = 0; i < frameCount; i++) {
+      channelData[i] = view.getInt16(i * 2, true) / 32768;
+    }
+
     const source = ctx.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(this.gainNode || ctx.destination);
+
+    const now = ctx.currentTime;
+    // 如果播放队列断流（落后当前时间超过 0.05s），重设基准时间并保留微小防抖缓冲 (30ms)
+    if (!this.nextAudioTime || this.nextAudioTime < now) {
+      this.nextAudioTime = now + 0.03;
+    }
+
+    source.start(this.nextAudioTime);
+    this.nextAudioTime += audioBuffer.duration;
+
+    this.activeAudioSources.add(source);
     source.onended = () => {
-      if (this.pcmBuffer && this.pcmBuffer.length) {
-        this.flushAndPlay();
-      } else {
-        this.audioPlaying = false;
-      }
+      this.activeAudioSources.delete(source);
     };
-    source.start();
   }
 }
 
